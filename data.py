@@ -9,12 +9,12 @@ import pandas as pd
 import numpy as np
 import dvc.api
 from dvc.exceptions import PathMissingError
+from sklearn.metrics import f1_score
 
 from tqdm import tqdm
 
 from config import dataset_id_to_mnemonic, dataset_mnemonic_to_id, predefined_models
 from vcs import get_path_to_revision
-
 
 bohr_bugginess_repo = 'https://github.com/giganticode/bohr-workdir-bugginess'
 diff_classifier_repo = 'https://github.com/giganticode/diff-classifier'
@@ -61,8 +61,10 @@ def read_labeled_dataset_from_transformers(model, selected_dataset):
     if 'label' in df.columns:
         df.loc[:, 'label'] = df.apply(lambda row: label_to_int[row["label"]], axis=1)
     else:
-        df.loc[:, 'label'] = 1
-    df.loc[:,  'prob_CommitLabel.BugFix'] = df.apply(lambda row: (row['probability'] if row['prediction'] == 'BugFix' else 1 - row['probability']), axis=1)
+        #df.loc[:, 'label'] = 1
+        raise AssertionError()
+    df.loc[:, 'prob_CommitLabel.BugFix'] = df.apply(
+        lambda row: (row['probability'] if row['prediction'] == 'BugFix' else (1 - row['probability'])), axis=1)
     return df
 
 
@@ -133,14 +135,14 @@ def compute_lf_coverages(d):
             else:
                 matcher = TRANSFORMER_REGEX.fullmatch(s)
                 if matcher:
-                    return 'transformer', f'{int(matcher.group(1))+10}>p>{matcher.group(1)}'
+                    return 'transformer', f'{int(matcher.group(1)) + 10}>p>{matcher.group(1)}'
                 else:
                     return 'file metric', s
 
         def process_index(s):
             return *decompose_heuristic_name(s), lf_value
 
-        cc.index = pd.MultiIndex.from_tuples([process_index(k) for k,v in cc.iterrows()])
+        cc.index = pd.MultiIndex.from_tuples([process_index(k) for k, v in cc.iterrows()])
         cc.index.set_names('assigned', level=2, inplace=True)
         resres.append(cc)
 
@@ -170,56 +172,76 @@ def select_datapoints(dataset_mnemonic, indices, batch, limit=50):
 
 @st.cache(show_spinner=False)
 def compute_metric(model, dataset, metric) -> float:
-        df = read_labeled_dataset(model, dataset)
-        if metric == 'accuracy':
-            return accuracy(df)
-        elif metric == 'precision':
-            return precision(df)
-        elif metric == 'f1':
-            return f1(df)
-        elif metric == 'recall':
-            return recall(df)
-        else:
-            raise ValueError(f'Unknown metric: {metric}')
+    df = read_labeled_dataset(model, dataset)
+    df = df[np.isclose(df['prob_CommitLabel.BugFix'], 0.5) == False]
+    predicted = (df['prob_CommitLabel.BugFix'] > 0.5).astype(int)
+    actual = df['label']
+    if metric == 'accuracy':
+        return accuracy(predicted, actual)
+    elif metric == 'precision':
+        return precision(predicted, actual)
+    elif metric == 'f1':
+        return f1(predicted, actual)
+    elif metric == 'recall':
+        return recall(predicted, actual)
+    else:
+        raise ValueError(f'Unknown metric: {metric}')
 
 
-def accuracy(df):
-    total = len(df)
-    correct = TP(df) + TN(df)
+def accuracy(predicted, actual):
+    total = len(predicted)
+    correct = TP(predicted, actual) + TN(predicted, actual)
     return float(correct) / total
 
 
-def precision(df):
-    predicted_positive = (TP(df) + FP(df))
+def precision(predicted, actual):
+    predicted_positive = (TP(predicted, actual) + FP(predicted, actual))
     if predicted_positive == 0:
         return float("nan")
-    return float(TP(df)) / predicted_positive
+    return float(TP(predicted, actual)) / predicted_positive
 
 
-def recall(df):
-    actual_positives = (TP(df) + FN(df))
+def recall(predicted, actual):
+    actual_positives = (TP(predicted, actual) + FN(predicted, actual))
     if actual_positives == 0:
         return float("nan")
-    return float(TP(df)) / actual_positives
+    return float(TP(predicted, actual)) / actual_positives
 
 
-def f1(df):
-    prec = precision(df)
-    rec = recall(df)
-    return 2 * prec * rec / (prec + rec)
+def f1(predicted, actual):
+    # prec = precision(predicted, actual)
+    # rec = recall(predicted, actual)
+    # return 2 * prec * rec / (prec + rec)
+    return f1_score(actual, predicted, average='macro')
 
 
-def TP(df):
-    return len(df[(df['label'] == 1) & (df['prob_CommitLabel.BugFix'] > 0.5)])
+def TP(predicted, actual):
+    """
+    >>> TP([1, 0, 0], [1, 0, 1])
+    1
+    """
+    return sum(a == 1 and p == 1 for p, a in zip(predicted, actual))
 
 
-def TN(df):
-    return len(df[(df['label'] == 0) & (df['prob_CommitLabel.BugFix'] < 0.5)])
+def TN(predicted, actual):
+    """
+    >>> TP([1, 0, 0], [1, 0, 1])
+    1
+    """
+    return sum(a == 0 and p == 0 for p, a in zip(predicted, actual))
 
 
-def FP(df):
-    return len(df[(df['label'] == 0) & (df['prob_CommitLabel.BugFix'] > 0.5)])
+def FP(predicted, actual):
+    """
+    >>> TP([1, 0, 0], [1, 0, 1])
+    0
+    """
+    return sum(a == 0 and p == 1 for p, a in zip(predicted, actual))
 
 
-def FN(df):
-    return len(df[(df['label'] == 1) & (df['prob_CommitLabel.BugFix'] < 0.5)])
+def FN(predicted, actual):
+    """
+    >>> TP([1, 0, 0], [1, 0, 1])
+    1
+    """
+    return sum(a == 1 and p == 0 for p, a in zip(predicted, actual))
