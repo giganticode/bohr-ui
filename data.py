@@ -12,7 +12,7 @@ from dvc.exceptions import PathMissingError
 
 from tqdm import tqdm
 
-from config import dataset_id_to_mnemonic, dataset_mnemonic_to_id
+from config import dataset_id_to_mnemonic, dataset_mnemonic_to_id, predefined_models
 from vcs import get_path_to_revision
 
 
@@ -43,11 +43,12 @@ def get_label_matrix(dataset_name: str) -> pd.DataFrame:
 @st.cache(allow_output_mutation=True, show_spinner=False)
 def read_labeled_dataset(model, selected_dataset):
     with st.spinner(f'Loading labels by model `{model}` for dataset `{selected_dataset}`'):
-        try:
-            df = read_labeled_dataset_from_bohr(model, selected_dataset)
-        except (PathMissingError, FileNotFoundError):
-            df = read_labeled_dataset_from_transformers(model, selected_dataset)
-        return df
+        if predefined_models[model]['model'] == 'label model':
+            return read_labeled_dataset_from_bohr(model, selected_dataset)
+        elif predefined_models[model]['model'] == 'transformer':
+            return read_labeled_dataset_from_transformers(model, selected_dataset)
+        else:
+            raise ValueError(f'Unknown model type: {predefined_models[model]["model"]}')
 
 
 @st.cache(show_spinner=False)
