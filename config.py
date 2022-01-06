@@ -30,6 +30,16 @@ predefined_models = {
         'issues': 'without issues',
         'model': 'label model',
     },
+    'all_heuristic_without_issues': {
+        'label_source': 'all heuristics',
+        'issues': 'without issues',
+        'model': 'label model',
+    },
+    'all_heuristic_with_issues': {
+        'label_source': 'all heuristics',
+        'issues': 'with issues',
+        'model': 'label model',
+    },
     'only_keywords': {
         'label_source': 'keywords',
         'issues': 'with issues',
