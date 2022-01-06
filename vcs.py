@@ -14,9 +14,13 @@ logger = logging.getLogger()
 
 def get_cloned_rev(repo: str, rev: str = "master") -> Repo:
     path = appdirs.user_cache_dir(
-        appname='bugginess-ui', appauthor='giganticode', version='0.1'
+        appname='bohr-ui', appauthor='giganticode', version='0.1'
     )
-    path_to_repo = Path(path) / repo / rev
+    host = 'https://github.com/'
+    if not repo.startswith('https://github.com/'):
+        raise AssertionError(repo)
+
+    path_to_repo = Path(path) / 'github-cache' / repo[len(host):] / rev
     if not path_to_repo.exists():
         return Repo.clone_from(repo, path_to_repo, depth=1, b=rev)
     else:
