@@ -55,7 +55,7 @@ def read_labeled_dataset_from_transformers(model, selected_dataset):
     label_to_int = {'NonBugFix': 0, 'BugFix': 1}
     path = f'models/{model}/assigned_labels_{selected_dataset}.csv'
     with st.spinner(f'Reading `{path}` from `{diff_classifier_repo}`'):
-        with dvc.api.open(path, repo=diff_classifier_repo, rev="833d1897fdc02236efa41d144a5502fb790fe81e") as f:
+        with dvc.api.open(path, repo=diff_classifier_repo) as f:
             df = pd.read_csv(f).rename(columns={'true_label': 'label'}, inplace=False)
     if 'label' in df.columns:
         df.loc[:, 'label'] = df.apply(lambda row: label_to_int[row["label"]], axis=1)
