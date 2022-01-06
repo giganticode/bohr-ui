@@ -51,10 +51,8 @@ def get_path_to_revision(
         remote_url: str, rev: str, force_update: bool = False
 ) -> Optional[Path]:
     old_revision: Repo = get_cloned_rev(remote_url, rev)
-    if is_update_needed(old_revision) or force_update:
+    if force_update or is_update_needed(old_revision):
         if force_update:
             logger.debug("Forcing refresh ...")
         update(old_revision)
-    else:
-        logger.info(f"Pass `--force-refresh` to refresh the repository.")
     return old_revision.working_tree_dir

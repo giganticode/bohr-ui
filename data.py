@@ -33,7 +33,7 @@ def get_label_matrix_locally(tmp_path):
 @st.cache(allow_output_mutation=True, show_spinner=False)
 def get_label_matrix(dataset_name: str) -> pd.DataFrame:
     path = f'runs/bugginess/dataset_debugging/{dataset_name}/heuristic_matrix.pkl'
-    path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', False)
+    path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', True)
     with st.spinner(f'Loading label matrix for dataset `{dataset_name}`'):
         with st.spinner(f'Reading `{path}` from `{bohr_bugginess_repo}`'):
             subprocess.run(["dvc", "pull", path], cwd=path_to_revision)
@@ -69,8 +69,7 @@ def read_labeled_dataset_from_transformers(model, selected_dataset):
 def read_labeled_dataset_from_bohr(model, selected_dataset):
     label_to_int = {'CommitLabel.NonBugFix': 0, 'CommitLabel.BugFix': 1}
     path = f'runs/bugginess/{model}/{selected_dataset}/labeled.csv'
-    path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', False)
-
+    path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', True)
     subprocess.run(["dvc", "pull", path], cwd=path_to_revision)
     full_path = f'{path_to_revision}/{path}'
     with st.spinner(f'Reading `{full_path}` from `{bohr_bugginess_repo}`'):
@@ -88,7 +87,7 @@ def read_labeled_dataset_from_bohr(model, selected_dataset):
 def get_dataset_chunk(dataset, chunk: int) -> List[Dict]:
     path = f'cached-datasets/{dataset}.jsonl'
     with st.spinner(f"Loading dataset `{path}` from `{bohr_bugginess_repo}`"):
-        path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', False)
+        path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', True)
         subprocess.run(["dvc", "pull", path], cwd=path_to_revision)
         return get_dataset_from_path(f'{path_to_revision}/{path}', chunk)
 
