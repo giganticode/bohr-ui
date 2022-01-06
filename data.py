@@ -16,8 +16,8 @@ from config import dataset_id_to_mnemonic, dataset_mnemonic_to_id
 from vcs import get_path_to_revision
 
 
-bohr_bugginess_repo = 'git@github.com:giganticode/bohr-workdir-bugginess.git'
-diff_classifier_repo = 'git@github.com:giganticode/diff-classifier.git'
+bohr_bugginess_repo = 'https://github.com/giganticode/bohr-workdir-bugginess'
+diff_classifier_repo = 'https://github.com/giganticode/diff-classifier'
 
 CHUNK_SIZE = 10000
 TRANSFORMER_REGEX = re.compile('fine_grained_changes_transformer_(\\d+)')
