@@ -150,8 +150,8 @@ def compute_lf_coverages(d):
     resres_df.columns = datasets_columns
     resres_df = resres_df[resres_df.sum(axis=1) > 0]
     if len(datasets_columns) == 2:
-        resres_df[f'Diff'] = resres_df.apply(lambda row: row[datasets_columns[0]] - row[datasets_columns[1]], axis=1)
-        resres_df[f'Ratio'] = resres_df.apply(lambda row: row[datasets_columns[0]] / row[datasets_columns[1]], axis=1)
+        resres_df[f'diff'] = resres_df.apply(lambda row: row[datasets_columns[0]] - row[datasets_columns[1]], axis=1)
+        resres_df[f'ratio'] = resres_df.apply(lambda row: row[datasets_columns[0]] / row[datasets_columns[1]], axis=1)
     resres_df['variance^(1/2)'] = resres_df.apply(lambda row: np.var(row) ** 0.5, axis=1)
     return resres_df
 

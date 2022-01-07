@@ -28,11 +28,12 @@ def display_coverage(chosen_datasets):
         for col, option in zip(cols, options):
             col.checkbox(option, value=True, key=option)
         coverages_df = compute_lf_coverages([dataset_mnemonic_to_id[mn] for mn in chosen_datasets])
+        columns = coverages_df.columns
         lfs_to_include = [option for option in options if st.session_state[option]]
         filtered_coverages_df = coverages_df[coverages_df.index.isin(lfs_to_include, level=0)]
 
         filtered_coverages_df.reset_index(inplace=True)
-        df_styler = filtered_coverages_df.style.format({key: "{:.2%}" for key in chosen_datasets})
+        df_styler = filtered_coverages_df.style.format({key: "{:.2%}" for key in columns})
         df_styler = df_styler.background_gradient(cmap=cm)
 
         st.write(df_styler)
