@@ -192,6 +192,7 @@ def display_datapoint_search_ui(dataset):
     if st.session_state.rt != '':
         datapoint = get_datapoint_by_id_beginning(dataset, st.session_state.rt)
         if datapoint:
+            st.write(f'https://github.com/{datapoint["owner"]}/{datapoint["repo"]}/commit/{datapoint["_id"]}')
             st.write(datapoint)
         else:
             st.warning('Data point not found.')
