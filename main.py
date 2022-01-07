@@ -181,7 +181,7 @@ def display_model_metrics(models, selected_datasets):
     st.write(metrics_styler)
     st.download_button('Download', data=metrics_dataframe.to_csv(), file_name='metrics.csv')
     col1, col2 = st.columns(2)
-    col1.radio('Metric', ['accuracy', 'f1', 'precision', 'recall', 'confusion matrix'], key='metric')
+    col1.radio('Metric', ['accuracy', 'f1 (macro)', 'precision', 'recall', 'confusion matrix'], key='metric')
     col2.checkbox(label="Show relative improvement", value=False, key='rel_imp')
     if st.session_state.rel_imp:
         col2.radio('', ['compare to baseline', 'compare to previous model'], key='comp_mode')

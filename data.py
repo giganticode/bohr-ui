@@ -171,11 +171,13 @@ def select_datapoints(dataset_mnemonic, indices, batch, limit=50):
 
 
 @st.cache(show_spinner=False)
-def compute_metric(model, dataset, metric, abstains_present) -> float:
+def compute_metric(model, dataset, metric, randomize_abstains) -> float:
     df = read_labeled_dataset(model, dataset)
-    if abstains_present:
-        df.loc[:, 'prob_CommitLabel.BugFix'] = df.apply(lambda row: (np.random.random() if np.isclose(row['prob_CommitLabel.BugFix'], 0.5) else row['prob_CommitLabel.BugFix']), axis=1)
-    predicted = (df['prob_CommitLabel.BugFix'] > 0.5).astype(int)
+    if randomize_abstains:
+        predicted_continuous = df.apply(lambda row: (np.random.random() if np.isclose(row['prob_CommitLabel.BugFix'], 0.5) else row['prob_CommitLabel.BugFix']), axis=1)
+    else:
+        predicted_continuous = df['prob_CommitLabel.BugFix']
+    predicted = (predicted_continuous > 0.5).astype(int)
     actual = df['label']
     if metric == 'accuracy':
         return accuracy(predicted, actual)
