@@ -142,8 +142,7 @@ def compute_lf_coverages(d):
         def process_index(s):
             return *decompose_heuristic_name(s), lf_value
 
-        cc.index = pd.MultiIndex.from_tuples([process_index(k) for k, v in cc.iterrows()])
-        cc.index.set_names('assigned', level=2, inplace=True)
+        cc.index = pd.MultiIndex.from_tuples([process_index(k) for k, v in cc.iterrows()], names=['type', 'details', 'value by LF'])
         resres.append(cc)
 
     resres_df = pd.concat(resres, axis=0)

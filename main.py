@@ -30,9 +30,11 @@ def display_coverage(chosen_datasets):
         coverages_df = compute_lf_coverages([dataset_mnemonic_to_id[mn] for mn in chosen_datasets])
         lfs_to_include = [option for option in options if st.session_state[option]]
         filtered_coverages_df = coverages_df[coverages_df.index.isin(lfs_to_include, level=0)]
-        df_styler = filtered_coverages_df.style.format({key: "{:.2%}" for key in filtered_coverages_df.columns})
 
+        filtered_coverages_df.reset_index(inplace=True)
+        df_styler = filtered_coverages_df.style.format({key: "{:.2%}" for key in chosen_datasets})
         df_styler = df_styler.background_gradient(cmap=cm)
+
         st.write(df_styler)
         st.download_button('Download', filtered_coverages_df.to_csv(), file_name='lf_values.csv')
         return filtered_coverages_df
@@ -112,16 +114,18 @@ def display_model_perf_on_ind_data_points(models, dataset):
     for i, model in enumerate(models):
         df = read_labeled_dataset(model, dataset_mnemonic_to_id[dataset])
         if i == 0:
-            res = df[['sha', 'message', 'label']]
+            res: pd.DataFrame = df[['sha', 'message', 'label']]
+            res.rename(columns={'label': 'true label'}, inplace=True)
         res.loc[:, f"{model}"] = df.apply(lambda row: 1 - np.abs(
             row["prob_CommitLabel.BugFix"] - row["label"]), axis = 1)
 
-    res.set_index(['sha', 'message', 'label'], inplace=True)
+    res.set_index(['sha', 'message', 'true label'], inplace=True)
     res.loc[:, 'variance'] = res.apply(lambda row: np.var(row), axis=1)
     res.loc[:, 'how_often_precise'] = res.apply(lambda row: (row > 0.5).sum() / float(n_exp), axis=1)
     res.sort_values(by=['how_often_precise', 'variance'], inplace=True, ascending=True)
+    res.reset_index(inplace=True)
 
-    df_styler = res.style.format({key: "{:.2%}" for key in res.columns})
+    df_styler = res.style.format({key: "{:.2%}" for key in list(models) + ['variance', 'how_often_precise']})
 
     df_styler = df_styler.background_gradient(cmap=cm)
 
@@ -168,16 +172,15 @@ def display_model_metrics(models, selected_datasets):
                                      predefined_models[model]['trained_on'] if 'trained_on' in predefined_models[model] else 'N/A',
                                  ) for model in models], names=['id', 'label source', 'issues', 'model', 'trained on'])
     metrics_dataframe = pd.DataFrame(matrix, index=ind, columns=selected_datasets)
+    metrics_dataframe.reset_index(level=[1,2,3,4], inplace=True)
     metrics_dataframe = metrics_dataframe.sort_values(by=selected_datasets[0], inplace=False)
     if st.session_state.rel_imp:
         metrics_dataframe = convert_metrics_to_relative(metrics_dataframe)
-
-    metrics_styler = metrics_dataframe.style.format({key: "{:.2%}" for key in metrics_dataframe.columns})
+    metrics_styler = metrics_dataframe.style.format({key: "{:.2%}" for key in selected_datasets})
     if st.session_state.rel_imp:
         metrics_styler = metrics_styler.background_gradient(cmap=sns.blend_palette("rg", as_cmap=True), vmin=-0.3, vmax=0.2, )
     else:
         metrics_styler = metrics_styler.background_gradient(cmap=cm)
-
     st.write(metrics_styler)
     st.download_button('Download', data=metrics_dataframe.to_csv(), file_name='metrics.csv')
     col1, col2 = st.columns(2)
