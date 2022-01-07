@@ -112,6 +112,7 @@ def display_model_filter_ui(filtered_models):
 
 def display_model_perf_on_ind_data_points(models, dataset):
     n_exp = len(models)
+    index_columns = ['sha', 'message', 'true label']
     for i, model in enumerate(models):
         df = read_labeled_dataset(model, dataset_mnemonic_to_id[dataset])
         if i == 0:
@@ -119,8 +120,11 @@ def display_model_perf_on_ind_data_points(models, dataset):
             res.rename(columns={'label': 'true label'}, inplace=True)
         res.loc[:, f"{model}"] = df.apply(lambda row: 1 - np.abs(
             row["prob_CommitLabel.BugFix"] - row["label"]), axis = 1)
+        if 'truncated' not in index_columns and 'truncated' in df.columns:
+            res.loc[:, 'truncated'] = df['truncated']
+            index_columns.append('truncated')
 
-    res.set_index(['sha', 'message', 'true label'], inplace=True)
+    res.set_index(index_columns, inplace=True)
     res.loc[:, 'variance'] = res.apply(lambda row: np.var(row), axis=1)
     res.loc[:, 'how_often_precise'] = res.apply(lambda row: (row > 0.5).sum() / float(n_exp), axis=1)
     res.sort_values(by=['how_often_precise', 'variance'], inplace=True, ascending=True)
@@ -185,7 +189,7 @@ def display_model_metrics(models, selected_datasets):
     st.write(metrics_styler)
     st.download_button('Download', data=metrics_dataframe.to_csv(), file_name='metrics.csv')
     col1, col2 = st.columns(2)
-    col1.radio('Metric', ['accuracy', 'f1 (macro)', 'precision', 'recall', 'confusion matrix'], key='metric')
+    col1.radio('Metric', ['accuracy', 'f1 (macro)', 'precision', 'recall', 'confusion matrix', 'certainty'], key='metric')
     col2.checkbox(label="Show relative improvement", value=False, key='rel_imp')
     if st.session_state.rel_imp:
         col2.radio('', ['compare to baseline', 'compare to previous model'], key='comp_mode')

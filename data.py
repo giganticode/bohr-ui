@@ -172,13 +172,15 @@ def select_datapoints(dataset_mnemonic, indices, batch, limit=50):
 @st.cache(show_spinner=False)
 def compute_metric(model, dataset, metric, randomize_abstains) -> float:
     df = read_labeled_dataset(model, dataset)
-    if randomize_abstains:
+    if randomize_abstains and metric != 'certainty':
         predicted_continuous = df.apply(lambda row: (np.random.random() if np.isclose(row['prob_CommitLabel.BugFix'], 0.5) else row['prob_CommitLabel.BugFix']), axis=1)
     else:
         predicted_continuous = df['prob_CommitLabel.BugFix']
     predicted = (predicted_continuous > 0.5).astype(int)
     actual = df['label']
-    if metric == 'accuracy':
+    if metric == 'certainty':
+        return certainty(predicted_continuous)
+    elif metric == 'accuracy':
         return accuracy(predicted, actual)
     elif metric == 'precision':
         return precision(predicted, actual)
@@ -189,6 +191,14 @@ def compute_metric(model, dataset, metric, randomize_abstains) -> float:
     else:
         raise ValueError(f'Unknown metric: {metric}')
 
+
+def certainty(predicted_continuous):
+    """
+    >>> certainty([0.85, 1, 1])
+    0.90
+    """
+    return ((predicted_continuous - 0.5) * 2).abs().mean()
+    
 
 def accuracy(predicted, actual):
     total = len(predicted)
