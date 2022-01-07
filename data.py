@@ -82,7 +82,7 @@ def read_labeled_dataset_from_bohr(model, selected_dataset):
     if 'label' in df.columns:
         df.loc[:, 'label'] = df.apply(lambda row: label_to_int[row["label"]], axis=1)
     else:
-        df.loc[:, 'label'] = 1.0
+        raise AssertionError()
     return df
 
 
@@ -171,9 +171,10 @@ def select_datapoints(dataset_mnemonic, indices, batch, limit=50):
 
 
 @st.cache(show_spinner=False)
-def compute_metric(model, dataset, metric) -> float:
+def compute_metric(model, dataset, metric, abstains_present) -> float:
     df = read_labeled_dataset(model, dataset)
-    df = df[np.isclose(df['prob_CommitLabel.BugFix'], 0.5) == False]
+    if abstains_present:
+        df.loc[:, 'prob_CommitLabel.BugFix'] = df.apply(lambda row: (np.random.random() if np.isclose(row['prob_CommitLabel.BugFix'], 0.5) else row['prob_CommitLabel.BugFix']), axis=1)
     predicted = (df['prob_CommitLabel.BugFix'] > 0.5).astype(int)
     actual = df['label']
     if metric == 'accuracy':

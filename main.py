@@ -155,7 +155,8 @@ def display_model_metrics(models, selected_datasets):
         st.spinner(f'Computing metrics for model `{model}`')
         for dataset in selected_datasets:
             st.spinner(f'Computing metrics for dataset `{dataset}`')
-            res = compute_metric(model, dataset_mnemonic_to_id[dataset], st.session_state.metric)
+            abstains_present = predefined_models[model]['model'] == 'label model'
+            res = compute_metric(model, dataset_mnemonic_to_id[dataset], st.session_state.metric, abstains_present)
             row.append(res)
         matrix.append(row)
 
