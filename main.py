@@ -177,10 +177,10 @@ def display_model_metrics(models, selected_datasets):
                                      predefined_models[model]['trained_on'] if 'trained_on' in predefined_models[model] else 'N/A',
                                  ) for model in models], names=['id', 'label source', 'issues', 'model', 'trained on'])
     metrics_dataframe = pd.DataFrame(matrix, index=ind, columns=selected_datasets)
-    metrics_dataframe.reset_index(level=[1,2,3,4], inplace=True)
     metrics_dataframe = metrics_dataframe.sort_values(by=selected_datasets[0], inplace=False)
     if st.session_state.rel_imp:
         metrics_dataframe = convert_metrics_to_relative(metrics_dataframe)
+    metrics_dataframe.reset_index(level=[1,2,3,4], inplace=True)
     metrics_styler = metrics_dataframe.style.format({key: "{:.2%}" for key in selected_datasets})
     if st.session_state.rel_imp:
         metrics_styler = metrics_styler.background_gradient(cmap=sns.blend_palette("rg", as_cmap=True), vmin=-0.3, vmax=0.2, )
