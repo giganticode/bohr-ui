@@ -155,7 +155,7 @@ def compute_lf_coverages(dataset_ids, indexes: Optional[Dict[str, List[int]]] = 
             coverage_by_value = ((label_matrix == lf_value).sum(axis=0) / float(ln)) if ln > 0 else (label_matrix == lf_value).sum(axis=0)
             all_datasets_one_value.append(coverage_by_value)
         all_datasets_one_value_df = pd.concat(all_datasets_one_value, axis=1)
-        all_datasets_one_value_df.index = pd.MultiIndex.from_tuples([(*decompose_heuristic_name(k), lf_value) for k, v in all_datasets_one_value_df.iterrows()], names=['type', 'details', 'value by LF'])
+        all_datasets_one_value_df.index = pd.MultiIndex.from_tuples([(*decompose_heuristic_name(k), lf_value) for k, v in all_datasets_one_value_df.iterrows()], names=['LF type', 'details', 'value by LF'])
         all_datasets_coverage.append(all_datasets_one_value_df)
 
     all_datasets_coverage_df = pd.concat(all_datasets_coverage, axis=0)

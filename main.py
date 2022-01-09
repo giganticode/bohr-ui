@@ -71,9 +71,9 @@ def display_coverage(lfs):
             df_styler = df_styler.background_gradient(cmap=cm)
             if not filtered_coverages_df.empty:
                 st_placeholder.write(df_styler)
-                st.write('`Labeling functions that have zero coverage throughout all the datasets are omited`')
+                st.write('`Labeling functions that have zero coverage over all the datasets are omited`')
             else:
-                st_placeholder.info(f'There are no fired data point in none of the datasets. '
+                st_placeholder.info(f'There are no fired data points in any of the datasets. '
                                     f'Are you sure that LF `{subset_criterion[0]}` can assign value `{subset_criterion[1]}`?')
             st.download_button('Download', filtered_coverages_df.to_csv(), file_name='lf_values.csv')
     except PathMissingError as ex:
@@ -84,7 +84,12 @@ def display_coverage(lfs):
 def display_model_filter_ui(filtered_models):
     col1, col2, col3, col4 = st.columns(4)
 
-    col1.radio('Label source', ['keywords', 'all heuristics', 'gitcproc', 'gitcproc_orig', 'all'], key="label_source", index=3)
+    col1.radio('Label source', ['keywords', 'all heuristics', 'gitcproc', 'gitcproc_orig', 'all'],
+               key="label_source", index=4,
+               help='keywords: only keyword heuristics\n\n'
+                    'all heiuristics: keywords + file metrics + transformer trained on conventional commits\n\n'
+                    'gitcproc:  9 "bugfix" keyword heuristics, "non-bugfix" if none matched\n\n'
+                    'gitcproc_orig: 9 "bugfix" keyword heuristics, abstain if none matched')
     label_source = st.session_state.label_source
     if label_source != 'all':
         filtered_models = [model for model in filtered_models if predefined_models[model]['label_source'] == label_source]
@@ -253,7 +258,8 @@ def display_model_metrics(models, selected_datasets, indices, lf_name, lf_value)
     st.write(metrics_styler)
     st.download_button('Download', data=metrics_dataframe.to_csv(), file_name='metrics.csv')
     c1, c2 = st.columns(2)
-    c1.radio('Metric', ['accuracy', 'f1 (macro)', 'precision', 'recall', 'certainty'], key='metric')
+    c1.radio('Metric', ['accuracy', 'f1 (macro)', 'precision', 'recall', 'certainty'],
+             key='metric', help='')
     c2.checkbox(label="Show relative improvement", value=False, key='rel_imp')
     if st.session_state.rel_imp:
         c2.radio('', ['compare to baseline', 'compare to previous model'], key='comp_mode')

@@ -6,6 +6,7 @@ def get_mnemonic_for_dataset(dataset_name):
         'commits_200k_files': '200k (files)',
         # 'commits_200k_files_no_merges': '200k (files) - no merges',
         'mauczka_files' : 'mauczka (files)',
+        'idan_files' : 'idan (files)',
         'bohr.herzig_train': 'herzig (train)',
         'bohr.herzig_eval': 'herzig (eval)',
     }
@@ -19,6 +20,7 @@ datasets_with_labels = [
     'mauczka_files',
     'bohr.herzig_train',
     'bohr.herzig_eval',
+    'idan_files',
 ]
 
 datasets_without_labels = [
