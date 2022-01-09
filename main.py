@@ -23,7 +23,11 @@ cm = sns.light_palette("green", as_cmap=True)
 
 def datapoints_subset_ui(lfs, prefix, default_indices: Optional[Tuple[int, int]]=None):
     col1, col2, col3 = st.columns(3)
-    col1.checkbox('Subset of data points', value=False, key=f'{prefix}.dataset_subset', help='Limit to those data points on which a specific LF was fired.')
+    col1.checkbox('Subset of data points', value=False, key=f'{prefix}.dataset_subset',
+                  help='Limit to those data points on which a specific LF was fired.\n\n'
+                       'The list also contains slicing function that are technically LFs but serve '
+                       'the purpose of selecting important subsets of data rather assigning labels to them,'
+                       ' e.g. `small change`, `large change`')
     if st.session_state[f'{prefix}.dataset_subset']:
         lf = col2.selectbox('to which LF:', lfs, key=f'{prefix}.heuristic', index=default_indices[0] if default_indices else 0)
         value = col3.selectbox('assigned value:', [0, 1], key=f'{prefix}.value', index=default_indices[1] if default_indices else 0)
