@@ -170,19 +170,6 @@ def compute_lf_coverages(dataset_ids, indexes: Optional[Dict[str, List[int]]] = 
     return all_datasets_coverage_df
 
 
-@st.cache(allow_output_mutation=True, show_spinner=False)
-def select_datapoints(dataset_mnemonic, indices, batch, limit=50):
-    dataset = get_dataset(dataset_mnemonic_to_id[dataset_mnemonic], batch)
-    res = {}
-    for i, datapoint in enumerate(dataset):
-        i += batch * CHUNK_SIZE
-        if i in indices:
-            res[i] = datapoint
-        if len(res) >= limit:
-            break
-    return res, len(dataset) == CHUNK_SIZE
-
-
 class TrueLabelNotFound(Exception):
     pass
 
