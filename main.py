@@ -266,6 +266,7 @@ def display_model_metrics(models, selected_datasets, indices, lf_name, lf_value)
     st.checkbox('Show confiusion matrix(es)', value=False, key='conf_matrix_checkbox')
     if st.session_state['conf_matrix_checkbox']:
         display_confusion_matrix(models, selected_datasets, indices, lf_name, lf_value)
+    return list(metrics_dataframe.index)
 
 
 def display_datapoint_search_ui(dataset):
@@ -336,7 +337,7 @@ def main():
         st.warning('No datasets selected.')
     else:
         lf_name, lf_value = subset_criterion if subset_criterion is not None else (None, None)
-        display_model_metrics(filtered_models, selected_datasets, indices, lf_name, lf_value)
+        filtered_models = display_model_metrics(filtered_models, selected_datasets, indices, lf_name, lf_value)
 
     st.write('## Debugging individual data points')
     default_indices = (
