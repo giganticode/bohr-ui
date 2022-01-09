@@ -1,6 +1,6 @@
 import re
 import subprocess
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 import jsonlines as jsonlines
 import streamlit as st
@@ -8,12 +8,11 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import dvc.api
-from dvc.exceptions import PathMissingError
 from sklearn.metrics import f1_score
 
 from tqdm import tqdm
 
-from config import dataset_id_to_mnemonic, dataset_mnemonic_to_id, predefined_models
+from config import predefined_models, get_mnemonic_for_dataset
 from vcs import get_path_to_revision
 
 bohr_bugginess_repo = 'https://github.com/giganticode/bohr-workdir-bugginess'
@@ -41,14 +40,23 @@ def get_label_matrix(dataset_name: str) -> pd.DataFrame:
 
 
 @st.cache(allow_output_mutation=True, show_spinner=False)
-def read_labeled_dataset(model, selected_dataset):
+def read_labeled_dataset(model, selected_dataset, indices):
     with st.spinner(f'Loading labels by model `{model}` for dataset `{selected_dataset}`'):
         if predefined_models[model]['model'] == 'label model':
-            return read_labeled_dataset_from_bohr(model, selected_dataset)
+            df = read_labeled_dataset_from_bohr(model, selected_dataset)
         elif predefined_models[model]['model'] == 'transformer':
-            return read_labeled_dataset_from_transformers(model, selected_dataset)
+            df = read_labeled_dataset_from_transformers(model, selected_dataset)
         else:
             raise ValueError(f'Unknown model type: {predefined_models[model]["model"]}')
+    return df.iloc[indices, :] if indices is not None else df
+
+
+@st.cache(show_spinner=False)
+def get_fired_indexes(dataset, heuristic, value):
+    label_matrix = get_label_matrix(dataset)
+    h_values = label_matrix[heuristic]
+    h_values = h_values[h_values == value]
+    return h_values.index.values.tolist()
 
 
 @st.cache(show_spinner=False)
@@ -81,8 +89,6 @@ def read_labeled_dataset_from_bohr(model, selected_dataset):
             df = pd.read_csv(f)
     if 'label' in df.columns:
         df.loc[:, 'label'] = df.apply(lambda row: label_to_int[row["label"]], axis=1)
-    else:
-        raise AssertionError()
     return df
 
 
@@ -116,44 +122,52 @@ def get_dataset(dataset: str, batch=0):
     return get_dataset_chunk(dataset, batch)
 
 
-def compute_lf_coverages(d):
+def decompose_heuristic_name(s):
+    matcher = KEYWORD_REGEX.fullmatch(s)
+    if matcher:
+        return 'keyword', matcher.group(1)
+    else:
+        matcher = TRANSFORMER_REGEX.fullmatch(s)
+        if matcher:
+            return 'transformer', f'{int(matcher.group(1)) + 10}>p>{matcher.group(1)}'
+        else:
+            return 'file metric', s
+
+
+@st.cache(show_spinner=False)
+def get_lfs(dataset_id) -> List[str]:
+    with st.spinner("Loading labeling function list ..."):
+        label_matrix = get_label_matrix(dataset_id)
+        return list(label_matrix.columns)
+
+
+@st.cache
+def compute_lf_coverages(dataset_ids, indexes: Optional[Dict[str, List[int]]] = None):
     lf_values = [0, 1]
-    resres = []
+    all_datasets_coverage = []
     for lf_value in lf_values:
-        res = []
-        for dataset in d:
-            df = get_label_matrix(dataset)
-            ln = len(df)
-            r = (df == lf_value).sum(axis=0) / float(ln)
-            res.append(r)
-        cc = pd.concat(res, axis=1)
+        all_datasets_one_value = []
+        for dataset in dataset_ids:
+            label_matrix = get_label_matrix(dataset)
+            if indexes is not None:
+                label_matrix = label_matrix.iloc[indexes[dataset], :]
+            ln = len(label_matrix)
+            coverage_by_value = ((label_matrix == lf_value).sum(axis=0) / float(ln)) if ln > 0 else (label_matrix == lf_value).sum(axis=0)
+            all_datasets_one_value.append(coverage_by_value)
+        all_datasets_one_value_df = pd.concat(all_datasets_one_value, axis=1)
+        all_datasets_one_value_df.index = pd.MultiIndex.from_tuples([(*decompose_heuristic_name(k), lf_value) for k, v in all_datasets_one_value_df.iterrows()], names=['type', 'details', 'value by LF'])
+        all_datasets_coverage.append(all_datasets_one_value_df)
 
-        def decompose_heuristic_name(s):
-            matcher = KEYWORD_REGEX.fullmatch(s)
-            if matcher:
-                return 'keyword', matcher.group(1)
-            else:
-                matcher = TRANSFORMER_REGEX.fullmatch(s)
-                if matcher:
-                    return 'transformer', f'{int(matcher.group(1)) + 10}>p>{matcher.group(1)}'
-                else:
-                    return 'file metric', s
-
-        def process_index(s):
-            return *decompose_heuristic_name(s), lf_value
-
-        cc.index = pd.MultiIndex.from_tuples([process_index(k) for k, v in cc.iterrows()], names=['type', 'details', 'value by LF'])
-        resres.append(cc)
-
-    resres_df = pd.concat(resres, axis=0)
-    datasets_columns = [dataset_id_to_mnemonic[ds] for ds in d]
-    resres_df.columns = datasets_columns
-    resres_df = resres_df[resres_df.sum(axis=1) > 0]
-    if len(datasets_columns) == 2:
-        resres_df[f'diff'] = resres_df.apply(lambda row: row[datasets_columns[0]] - row[datasets_columns[1]], axis=1)
-        resres_df[f'ratio'] = resres_df.apply(lambda row: row[datasets_columns[0]] / row[datasets_columns[1]], axis=1)
-    resres_df['variance^(1/2)'] = resres_df.apply(lambda row: np.var(row) ** 0.5, axis=1)
-    return resres_df
+    all_datasets_coverage_df = pd.concat(all_datasets_coverage, axis=0)
+    datasets_columns = [get_mnemonic_for_dataset(ds) for ds in dataset_ids]
+    all_datasets_coverage_df.columns = datasets_columns
+    all_datasets_coverage_df = all_datasets_coverage_df[all_datasets_coverage_df.sum(axis=1) > 0]
+    if not all_datasets_coverage_df.empty:
+        if len(datasets_columns) == 2:
+            all_datasets_coverage_df[f'diff'] = all_datasets_coverage_df.apply(lambda row: row[datasets_columns[0]] - row[datasets_columns[1]], axis=1)
+            all_datasets_coverage_df[f'ratio'] = all_datasets_coverage_df.apply(lambda row: row[datasets_columns[0]] / row[datasets_columns[1]], axis=1)
+        all_datasets_coverage_df['variance^(1/2)'] = all_datasets_coverage_df.apply(lambda row: np.var(row) ** 0.5, axis=1)
+    return all_datasets_coverage_df
 
 
 @st.cache(allow_output_mutation=True, show_spinner=False)
@@ -169,14 +183,19 @@ def select_datapoints(dataset_mnemonic, indices, batch, limit=50):
     return res, len(dataset) == CHUNK_SIZE
 
 
+class TrueLabelNotFound(Exception):
+    pass
+
+
 @st.cache(show_spinner=False)
-def compute_metric(model, dataset, metric, randomize_abstains) -> float:
-    df = read_labeled_dataset(model, dataset)
+def compute_metric(df, metric, randomize_abstains) -> float:
     if randomize_abstains and metric != 'certainty':
         predicted_continuous = df.apply(lambda row: (np.random.random() if np.isclose(row['prob_CommitLabel.BugFix'], 0.5) else row['prob_CommitLabel.BugFix']), axis=1)
     else:
         predicted_continuous = df['prob_CommitLabel.BugFix']
     predicted = (predicted_continuous > 0.5).astype(int)
+    if 'label' not in df.columns:
+        raise TrueLabelNotFound()
     actual = df['label']
     if metric == 'certainty':
         return certainty(predicted_continuous)
@@ -184,7 +203,7 @@ def compute_metric(model, dataset, metric, randomize_abstains) -> float:
         return accuracy(predicted, actual)
     elif metric == 'precision':
         return precision(predicted, actual)
-    elif metric == 'f1':
+    elif metric == 'f1 (macro)':
         return f1(predicted, actual)
     elif metric == 'recall':
         return recall(predicted, actual)

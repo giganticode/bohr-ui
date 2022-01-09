@@ -1,22 +1,29 @@
-dataset_id_to_mnemonic = {
-    'levin_files': 'levin (files)',
-    'berger_files': 'berger (files)',
-    'manual_labels.herzig': 'herzig',
-    'commits_200k_files': '200k (files)',
-    # 'commits_200k_files_no_merges': '200k (files) - no merges',
-    'mauczka_files' : 'mauczka (files)',
-    'bohr.herzig_train': 'herzig (train)',
-    'bohr.herzig_eval': 'herzig (eval)',
-    'bohr_200k_small_changes': '200k (small diffs)',
-    'bohr_200k_large_changes': '200k (large diffs)',
-    'levin_small_changes': 'levin (small diffs)',
-    'levin_large_changes': 'levin (large diffs)',
-    'berger_small_changes': 'berger (small diffs)',
-    'berger_large_changes': 'berger (large diffs)',
-}
+def get_mnemonic_for_dataset(dataset_name):
+    map = {
+        'levin_files': 'levin (files)',
+        'berger_files': 'berger (files)',
+        'manual_labels.herzig': 'herzig',
+        'commits_200k_files': '200k (files)',
+        # 'commits_200k_files_no_merges': '200k (files) - no merges',
+        'mauczka_files' : 'mauczka (files)',
+        'bohr.herzig_train': 'herzig (train)',
+        'bohr.herzig_eval': 'herzig (eval)',
+    }
+    return map[dataset_name]
 
 
-dataset_mnemonic_to_id = {mn: id for id, mn in dataset_id_to_mnemonic.items()}
+datasets_with_labels = [
+    'levin_files',
+    'berger_files',
+    'manual_labels.herzig',
+    'mauczka_files',
+    'bohr.herzig_train',
+    'bohr.herzig_eval',
+]
+
+datasets_without_labels = [
+    'commits_200k_files',
+]
 
 
 predefined_models = {

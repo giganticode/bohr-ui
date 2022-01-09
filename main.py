@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -13,75 +13,70 @@ st.set_page_config(
     layout="wide",
 )
 
-from config import dataset_mnemonic_to_id, predefined_models
-from data import read_labeled_dataset, get_dataset, CHUNK_SIZE, compute_lf_coverages, get_label_matrix, \
-    select_datapoints, compute_metric
-
+from config import predefined_models, datasets_with_labels, datasets_without_labels, get_mnemonic_for_dataset
+from data import read_labeled_dataset, get_dataset, compute_lf_coverages, compute_metric, get_fired_indexes, get_lfs
 
 cm = sns.light_palette("green", as_cmap=True)
 
 
-def display_coverage(chosen_datasets):
+def datapoints_subset_ui(lfs, prefix, default_indices: Optional[Tuple[int, int]]=None):
+    col1, col2, col3 = st.columns(3)
+    col1.checkbox('Subset of data points', value=False, key=f'{prefix}.dataset_subset', help='!!!')
+    if st.session_state[f'{prefix}.dataset_subset']:
+
+        lf = col2.selectbox('Select LF', lfs, key=f'{prefix}.heuristic', index=default_indices[0] if default_indices else 0)
+        value = col3.selectbox('Select value', [0, 1], key=f'{prefix}.value', index=default_indices[1] if default_indices else 0)
+        return lf, value
+    return None
+
+
+def choose_dataset_ui(datasets, lfs, prefix, default_indices=None):
+    chosen_dataset = st.selectbox('Select dataset to be displayed:', datasets, key=f'{prefix}.msl', index=default_indices[0] if default_indices else 0, format_func=get_mnemonic_for_dataset)
+    indices = None
+    if chosen_dataset is not None:
+        res = datapoints_subset_ui(lfs, prefix, (default_indices[1], default_indices[2]))
+        if res is not None:
+            indices = get_fired_indexes(chosen_dataset, res[0], res[1])
+    return chosen_dataset, indices
+
+
+def choose_datasets_ui(datasets, lfs, prefix):
+    chosen_datasets = st.multiselect('Select datasets to be displayed:', options=datasets, key=f'{prefix}.msl', format_func=get_mnemonic_for_dataset)
+    indices = None
+    if len(chosen_datasets) > 0:
+        res = datapoints_subset_ui(lfs, prefix)
+        if res is not None:
+            indices = {dataset: get_fired_indexes(dataset, res[0], res[1]) for dataset in chosen_datasets}
+    return chosen_datasets, indices
+
+
+def display_coverage(lfs):
     try:
-        options = ['transformer', 'keyword', 'file metric']
-        cols = st.columns(len(options))
-        for col, option in zip(cols, options):
-            col.checkbox(option, value=True, key=option)
-        coverages_df = compute_lf_coverages([dataset_mnemonic_to_id[mn] for mn in chosen_datasets])
-        columns = coverages_df.columns
-        lfs_to_include = [option for option in options if st.session_state[option]]
-        filtered_coverages_df = coverages_df[coverages_df.index.isin(lfs_to_include, level=0)]
+        chosen_datasets, indices = choose_datasets_ui(datasets_with_labels + datasets_without_labels, lfs, 'lf_coverage')
+        if len(chosen_datasets) > 0:
+            st_placeholder = st.empty()
+            options = ['transformer', 'keyword', 'file metric']
+            cols = st.columns(len(options))
+            for col, option in zip(cols, options):
+                col.checkbox(option, value=True, key=option)
+            coverages_df = compute_lf_coverages([mn for mn in chosen_datasets], indices)
+            lfs = coverages_df.columns
+            lfs_to_include = [option for option in options if st.session_state[option]]
+            filtered_coverages_df = coverages_df[coverages_df.index.isin(lfs_to_include, level=0)]
 
-        filtered_coverages_df.reset_index(inplace=True)
-        df_styler = filtered_coverages_df.style.format({key: "{:.2%}" for key in columns})
-        df_styler = df_styler.background_gradient(cmap=cm)
-
-        st.write(df_styler)
-        st.download_button('Download', filtered_coverages_df.to_csv(), file_name='lf_values.csv')
-        return filtered_coverages_df
+            filtered_coverages_df.reset_index(inplace=True)
+            df_styler = filtered_coverages_df.style.format({key: "{:.2%}" for key in lfs})
+            df_styler = df_styler.background_gradient(cmap=cm)
+            if not filtered_coverages_df.empty:
+                st_placeholder.write(df_styler)
+                st.info('Labeling functions that have zero coverage throughout all the datasets are omited')
+            else:
+                st_placeholder.info('There are no fired data point in none of the datasets')
+            st.download_button('Download', filtered_coverages_df.to_csv(), file_name='lf_values.csv')
+            return filtered_coverages_df
     except PathMissingError as ex:
         st.warning("Selected dataset is not found. Was it uploaded to dvc remote?")
         st.exception(ex)
-
-
-def display_fired_datapoints(chosen_datasets):
-    st.write('#### See fired datapoints')
-    col1, col2, col3 = st.columns([3, 5, 2])
-    dataset_mnemonic = col1.selectbox('Select dataset', chosen_datasets)
-    label_matrix = get_label_matrix(dataset_mnemonic_to_id[dataset_mnemonic])
-    heuristic = col2.selectbox('Select heuristic', label_matrix.columns)
-    value = col3.selectbox('Select value', [0, 1])
-    h_values = label_matrix[heuristic]
-    h_values = h_values[h_values == value]
-    dp_indexes = h_values.index.values.tolist()
-
-    if f'batch.{dataset_mnemonic}' not in st.session_state:
-        st.session_state[f'batch.{dataset_mnemonic}'] = 0
-
-    def inc_batch():
-        st.session_state[f'batch.{dataset_mnemonic}'] += 1
-
-    def dec_batch():
-        st.session_state[f'batch.{dataset_mnemonic}'] -= 1
-
-    batch = st.session_state[f'batch.{dataset_mnemonic}']
-    with st.spinner(f'Looking for data points on which LF `{heuristic}` was fired ...'):
-        datapoints, dataset_truncated = select_datapoints(dataset_mnemonic, dp_indexes, batch)
-    if dataset_truncated:
-        st.warning(f'This dataset is large. Checking only data points {batch * CHUNK_SIZE} to {(batch+1) * CHUNK_SIZE}')
-        if batch > 0:
-            st.button(label=f'<< {(batch-1) * CHUNK_SIZE} - {(batch) * CHUNK_SIZE}', on_click=dec_batch)
-        st.button(label=f'>> {(batch+1) * CHUNK_SIZE} - {(batch+2) * CHUNK_SIZE}', on_click=inc_batch)
-    if len(datapoints) > 1:
-        st.select_slider('Drag the slider to browse data points to which the selected labeling function assigns this value', key='sl', options=sorted(datapoints.keys()))
-
-        index = st.session_state.sl
-        st.json(datapoints[index])
-    elif len(datapoints) == 1:
-        st.info('Only one datapoint found:')
-        st.json(datapoints[dp_indexes[0]])
-    else:
-        st.info('No datapoints found.')
 
 
 def display_model_filter_ui(filtered_models):
@@ -110,19 +105,26 @@ def display_model_filter_ui(filtered_models):
     return filtered_models
 
 
-def display_model_perf_on_ind_data_points(models, dataset):
+def display_model_perf_on_ind_data_points(models, dataset, indices):
     n_exp = len(models)
-    index_columns = ['sha', 'message', 'true label']
+    index_columns = ['sha', 'message']
     for i, model in enumerate(models):
-        df = read_labeled_dataset(model, dataset_mnemonic_to_id[dataset])
+        df = read_labeled_dataset(model, dataset, indices if indices is not None else None)
+        if df.empty:
+            st.info('No datapoints found.')
+            return
         if i == 0:
-            res: pd.DataFrame = df[['sha', 'message', 'label']]
-            res.rename(columns={'label': 'true label'}, inplace=True)
-        res.loc[:, f"{model}"] = df.apply(lambda row: 1 - np.abs(
-            row["prob_CommitLabel.BugFix"] - row["label"]), axis = 1)
-        if 'truncated' not in index_columns and 'truncated' in df.columns:
-            res.loc[:, 'truncated'] = df['truncated']
-            index_columns.append('truncated')
+            if 'label' in df.columns:
+                res: pd.DataFrame = df[['sha', 'message', 'label']]
+                res.rename(columns={'label': 'true label'}, inplace=True)
+                index_columns.append('true label')
+            else:
+                res: pd.DataFrame = df[['sha', 'message']]
+        if 'label' in df.columns:
+            res.loc[:, f"{model}"] = df.apply(lambda row: 1 - np.abs(
+                row["prob_CommitLabel.BugFix"] - row["label"]), axis = 1)
+        else:
+            res.loc[:, f"{model}"] = df["prob_CommitLabel.BugFix"]
 
     res.set_index(index_columns, inplace=True)
     res.loc[:, 'variance'] = res.apply(lambda row: np.var(row), axis=1)
@@ -151,7 +153,7 @@ def convert_metrics_to_relative(df):
     return pd.DataFrame(rel_matrix, index=df.index, columns=df.columns)
 
 
-def display_model_metrics(models, selected_datasets):
+def display_model_metrics(models, selected_datasets, indices):
     if 'metric' not in st.session_state:
         st.session_state['metric'] = 'accuracy'
     if 'rel_imp' not in st.session_state:
@@ -165,7 +167,11 @@ def display_model_metrics(models, selected_datasets):
         for dataset in selected_datasets:
             st.spinner(f'Computing metrics for dataset `{dataset}`')
             abstains_present = predefined_models[model]['model'] == 'label model'
-            res = compute_metric(model, dataset_mnemonic_to_id[dataset], st.session_state.metric, abstains_present)
+            df = read_labeled_dataset(model, dataset, indices[dataset] if indices is not None else None)
+            if not df.empty:
+                res = compute_metric(df, st.session_state.metric, abstains_present)
+            else:
+                res = np.nan
             row.append(res)
         matrix.append(row)
 
@@ -196,7 +202,7 @@ def display_model_metrics(models, selected_datasets):
 
 
 def display_datapoint_search_ui(dataset):
-    st.text_input("Search datapoint ...", key='rt', placeholder='Start typing a commit hash')
+    st.text_input("Get full information about data point ...", key='rt', placeholder='Start typing a commit hash')
     if st.session_state.rt != '':
         datapoint = get_datapoint_by_id_beginning(dataset, st.session_state.rt)
         if datapoint:
@@ -214,32 +220,33 @@ def get_datapoint_by_id_beginning(dataset, id) -> Optional[Dict]:
 
 
 def main():
+    lfs = get_lfs(datasets_with_labels[-1])
+
     st.write('## Assignment of labels by labeling functions')
-    chosen_datasets = st.multiselect('Select datasets to be displayed:', dataset_mnemonic_to_id.keys(), key='msl')
-    if len(chosen_datasets) > 0:
-        display_coverage(chosen_datasets)
-    display_fired_datapoints(dataset_mnemonic_to_id.keys())
+    display_coverage(lfs)
 
     st.write('## Performance of models')
 
-    # selected_models = st.multiselect('Select models: ', predefined_models.keys(), default=predefined_models.keys())
     filtered_models = display_model_filter_ui(predefined_models.keys())
-
-    selected_datasets = st.multiselect('Select datasets:', dataset_mnemonic_to_id.keys())
-
+    selected_datasets, indices = choose_datasets_ui(datasets_with_labels, lfs, 'model_perf')
     if len(filtered_models) == 0:
         st.warning('No selected model satisfies chosen conditions.')
     elif len(selected_datasets) == 0:
         st.warning('No datasets selected.')
     else:
-        display_model_metrics(filtered_models, selected_datasets)
+        display_model_metrics(filtered_models, selected_datasets, indices)
 
-    st.write('#### Performance on individual data points')
-    selected_dataset = st.selectbox('Select dataset:', dataset_mnemonic_to_id.keys())
+    st.write('## Debugging individual data points \n(Values that are shown are the probabilities assigned to true labels)')
+    default_indices = (
+        datasets_with_labels.index(st.session_state[f'model_perf.msl'][0]) if (f'model_perf.msl' in st.session_state and st.session_state[f'model_perf.msl']) else 0,
+        lfs.index(st.session_state[f'model_perf.heuristic']) if f'model_perf.heuristic' in st.session_state else 0,
+        st.session_state[f'model_perf.value'] if f'model_perf.value' in st.session_state else 0,
+    )
+    selected_dataset, indices = choose_dataset_ui(datasets_with_labels, lfs, 'model_perf_ind', default_indices)
     if selected_dataset is not None and len(filtered_models) > 0:
-        display_model_perf_on_ind_data_points(filtered_models, selected_dataset)
+        display_model_perf_on_ind_data_points(filtered_models, selected_dataset, indices)
 
-        dataset = get_dataset(dataset_mnemonic_to_id[selected_dataset])
+        dataset = get_dataset(selected_dataset)
         display_datapoint_search_ui(dataset)
 
 
