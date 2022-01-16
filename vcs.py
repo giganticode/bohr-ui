@@ -12,7 +12,7 @@ import dvc.api
 logger = logging.getLogger()
 
 
-def get_cloned_rev(repo: str, rev: str = "master") -> Repo:
+def get_cloned_rev(repo: str, rev: str = "master", commit: Optional[str] = None) -> Repo:
     path = appdirs.user_cache_dir(
         appname='bohr-ui', appauthor='giganticode', version='0.1'
     )
@@ -21,8 +21,13 @@ def get_cloned_rev(repo: str, rev: str = "master") -> Repo:
         raise AssertionError(repo)
 
     path_to_repo = Path(path) / 'github-cache' / repo[len(host):] / rev
+    if commit is not None:
+        path_to_repo = path_to_repo / commit
     if not path_to_repo.exists():
-        return Repo.clone_from(repo, path_to_repo, depth=1, b=rev)
+        repo = Repo.clone_from(repo, path_to_repo, depth=1, b=rev)
+        if commit is not None:
+            repo.git.checkout(commit)
+        return repo
     else:
         return Repo(path_to_repo)
 
@@ -48,11 +53,11 @@ def update(
 
 
 def get_path_to_revision(
-        remote_url: str, rev: str, force_update: bool = False
+        remote_url: str, rev: str, force_update: bool = False, commit: Optional[str] = None
 ) -> Optional[Path]:
-    old_revision: Repo = get_cloned_rev(remote_url, rev)
+    old_revision: Repo = get_cloned_rev(remote_url, rev, commit)
     if force_update or is_update_needed(old_revision):
         if force_update:
             logger.debug("Forcing refresh ...")
         update(old_revision)
-    return old_revision.working_tree_dir
+    return Path(old_revision.working_tree_dir)

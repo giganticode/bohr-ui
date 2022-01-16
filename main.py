@@ -5,10 +5,15 @@ import streamlit as st
 
 import numpy as np
 import seaborn as sns
+from bohrapi.artifacts import Commit
+from bohrruntime.heuristics import load_heuristic_by_name
+from bohrruntime.util.paths import AbsolutePath
 from dvc.exceptions import PathMissingError
 from matplotlib import pyplot as plt
 from pandas import MultiIndex
-from sklearn.metrics import ConfusionMatrixDisplay
+from sklearn.metrics import confusion_matrix
+
+from vcs import get_path_to_revision
 
 st.set_page_config(
     page_title="Bugginess",
@@ -16,7 +21,8 @@ st.set_page_config(
 )
 
 from config import predefined_models, datasets_with_labels, datasets_without_labels, get_mnemonic_for_dataset
-from data import read_labeled_dataset, get_dataset, compute_lf_coverages, compute_metric, get_fired_indexes, get_lfs
+from data import read_labeled_dataset, get_dataset, compute_lf_coverages, compute_metric, get_fired_indexes, get_lfs, \
+    bohr_repo, load_used_bohr_commit_sha
 
 cm = sns.light_palette("green", as_cmap=True)
 
@@ -31,6 +37,11 @@ def datapoints_subset_ui(lfs, prefix, default_indices: Optional[Tuple[int, int]]
     if st.session_state[f'{prefix}.dataset_subset']:
         lf = col2.selectbox('to which LF:', lfs, key=f'{prefix}.heuristic', index=default_indices[0] if default_indices else 0)
         value = col3.selectbox('assigned value:', [0, 1], key=f'{prefix}.value', index=default_indices[1] if default_indices else 0)
+        commit = load_used_bohr_commit_sha()
+        path_to_revision = get_path_to_revision(bohr_repo, 'bohr-0.5', True, commit)
+        _, path = load_heuristic_by_name(lf, Commit, AbsolutePath(path_to_revision) / 'heuristics', return_path=True)
+        github_link = f'https://github.com/giganticode/bohr/tree/{commit}/' + str(path)
+        col2.write(f'View labeling function on [GitHub]({github_link})')
         return lf, value
     return None
 
@@ -316,6 +327,52 @@ def get_layout_for_confusion(n):
     return map[n]
 
 
+def plot_confusion_matrix(y_true, y_pred,
+                          normalize,
+                          title='',
+                          cmap="viridis", ax=None):
+
+    # Compute confusion matrix
+    if normalize not in ["true", "pred", "all", None]:
+        raise ValueError("normalize must be one of {'true', 'pred', 'all', None}")
+
+    cm = confusion_matrix(y_true, y_pred)
+    with np.errstate(all="ignore"):
+        if normalize == "true":
+            cm = cm / cm.sum(axis=1, keepdims=True)
+        elif normalize == "pred":
+            cm = cm / cm.sum(axis=0, keepdims=True)
+        elif normalize == "all":
+            cm = cm / cm.sum()
+    cm = np.nan_to_num(cm)
+
+    im = ax.imshow(cm, interpolation='nearest', cmap=cmap)
+    ax.figure.colorbar(im, ax=ax)
+    # We want to show all ticks...
+    ax.set(xticks=np.arange(cm.shape[1]),
+           yticks=np.arange(cm.shape[0]),
+           # ... and label them with the respective list entries
+           # xticklabels=classes, yticklabels=classes,
+           title=title,
+           ylabel='True label',
+           xlabel='Predicted label')
+
+    # Rotate the tick labels and set their alignment.
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
+             rotation_mode="anchor")
+
+    # Loop over data dimensions and create text annotations.
+    fmt = '.2f' if normalize else 'd'
+    thresh = cm.max() / 2.
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            ax.text(j, i, format(cm[i, j], fmt),
+                    ha="center", va="center",
+                    color="white" if cm[i, j] > thresh else "black")
+
+    return ax
+
+
 def confusion(dataset, model, indices, normalize, handle):
     labeled_dataset = read_labeled_dataset(model, dataset, indices[dataset] if indices is not None else None)
     if labeled_dataset.empty:
@@ -324,10 +381,11 @@ def confusion(dataset, model, indices, normalize, handle):
     predicted_continuous = labeled_dataset['prob_CommitLabel.BugFix']
     predicted = (predicted_continuous > 0.5).astype(int)
     ax= plt.subplot()
-    disp = ConfusionMatrixDisplay.from_predictions(labeled_dataset['label'], predicted, normalize=normalize, ax=ax)
     title_details = "\n".join(predefined_models[model].values())
-    ax.set_title(f'{model}\n\n{title_details}')
-    handle.pyplot(disp.figure_)
+    title = f'{model}\n\n{title_details}'
+    disp = plot_confusion_matrix(labeled_dataset['label'], predicted, normalize=normalize, title=title, ax=ax)
+
+    handle.pyplot(disp.figure)
 
 
 def main():

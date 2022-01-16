@@ -8,6 +8,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import dvc.api
+from bohrruntime.core import load_workspace
 from sklearn.metrics import f1_score
 
 from tqdm import tqdm
@@ -17,6 +18,9 @@ from vcs import get_path_to_revision
 
 bohr_bugginess_repo = 'https://github.com/giganticode/bohr-workdir-bugginess'
 diff_classifier_repo = 'https://github.com/giganticode/diff-classifier'
+bohr_repo = 'https://github.com/giganticode/bohr'
+
+DATASET_DEBUGGING_EXPERIMENT = 'dataset_debugging'
 
 CHUNK_SIZE = 10000
 TRANSFORMER_REGEX = re.compile('fine_grained_changes_transformer_(\\d+)')
@@ -29,9 +33,19 @@ def get_label_matrix_locally(tmp_path):
         return pd.read_pickle(tmp_path)
 
 
+@st.cache(show_spinner=False)
+def load_used_bohr_commit_sha() -> str:
+    path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', True)
+    workspace = load_workspace(path_to_revision)
+    for exp in workspace.experiments:
+        if exp.name == DATASET_DEBUGGING_EXPERIMENT:
+            return exp.revision
+    raise AssertionError(f'Experiment {DATASET_DEBUGGING_EXPERIMENT} not found.')
+
+
 @st.cache(allow_output_mutation=True, show_spinner=False)
 def get_label_matrix(dataset_name: str) -> pd.DataFrame:
-    path = f'runs/bugginess/dataset_debugging/{dataset_name}/heuristic_matrix.pkl'
+    path = f'runs/bugginess/{DATASET_DEBUGGING_EXPERIMENT}/{dataset_name}/heuristic_matrix.pkl'
     path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', True)
     with st.spinner(f'Loading label matrix for dataset `{dataset_name}`'):
         with st.spinner(f'Reading `{path}` from `{bohr_bugginess_repo}`'):
