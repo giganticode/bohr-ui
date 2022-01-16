@@ -7,11 +7,11 @@ license = "MIT"
 
 [tool.poetry.dependencies]
 python = "^3.8"
-pandas = "1.3.5"
+pandas = "^1.3"
 streamlit = "1.3.1"
 jsonlines = "3.0.0"
 seaborn = "0.11.2"
-scikit-learn = "0.21.3"
+scikit-learn = "^0.22"
 bohr-runtime = { git = "git@github.com:giganticode/bohr-runtime", branch = "master" }
 dvc = "2.0.18"
 
