@@ -462,6 +462,6 @@ async def run_code():
                                   ])
     print(output)
 
-loop = asyncio.get_event_loop()
-loop.run_until_complete(run_code())
+
+asyncio.run(run_code())
 
