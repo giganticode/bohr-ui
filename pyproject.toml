@@ -14,6 +14,7 @@ seaborn = "0.11.2"
 scikit-learn = "^0.22"
 bohr-runtime = { git = "https://github.com/giganticode/bohr-runtime", branch = "master" }
 dvc = "2.0.18"
+aiopyston = "^1.2.1"
 
 [tool.poetry.dev-dependencies]
 

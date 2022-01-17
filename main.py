@@ -450,3 +450,17 @@ def main():
 
 main()
 
+from pyston import PystonClient,File
+import asyncio
+
+async def main():
+    client = PystonClient()
+    output = await client.execute("python",
+                                  [
+                                      File("import subprocess; subprocess.run(['pwd'])")
+                                  ])
+    print(output)
+
+loop = asyncio.get_event_loop()
+loop.run_until_complete(main())
+
