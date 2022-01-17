@@ -453,7 +453,8 @@ main()
 from pyston import PystonClient,File
 import asyncio
 
-async def main():
+
+async def run_code():
     client = PystonClient()
     output = await client.execute("python",
                                   [
@@ -462,5 +463,5 @@ async def main():
     print(output)
 
 loop = asyncio.get_event_loop()
-loop.run_until_complete(main())
+loop.run_until_complete(run_code())
 
