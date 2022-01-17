@@ -96,35 +96,53 @@ def display_coverage(lfs):
         st.exception(ex)
 
 
-def display_model_filter_ui(filtered_models):
-    col1, col2, col3, col4 = st.columns(4)
+def display_model_filter_ui(all_models):
+    models_to_include = all_models.keys()
 
-    col1.radio('Label source', ['keywords', 'all heuristics', 'gitcproc', 'gitcproc_orig', 'all'],
-               key="label_source", index=4,
-               help='keywords: only keyword heuristics\n\n'
-                    'all heiuristics: keywords + file metrics + transformer trained on conventional commits\n\n'
-                    'gitcproc:  9 "bugfix" keyword heuristics, "non-bugfix" if none matched\n\n'
-                    'gitcproc_orig: 9 "bugfix" keyword heuristics, abstain if none matched')
-    label_source = st.session_state.label_source
-    if label_source != 'all':
-        filtered_models = [model for model in filtered_models if predefined_models[model]['label_source'] == label_source]
+    st.checkbox('Include label models', value=False, key='include_label_models')
+    if st.session_state['include_label_models']:
+        col1, col2, col3 = st.columns(3)
+        col1.radio('Labeling functions', ['keywords', 'all heuristics', 'gitcproc', 'gitcproc_orig', 'all'],
+                   key="labeling_functions", index=4,
+                   help='keywords: only keyword heuristics\n\n'
+                        'all heuristics: keywords + file metrics + transformer trained on conventional commits\n\n'
+                        'gitcproc:  9 "bugfix" keyword heuristics, "non-bugfix" if none matched\n\n'
+                        'gitcproc_orig: 9 "bugfix" keyword heuristics, abstain if none matched')
+        lfs_radio = st.session_state['labeling_functions']
+        if lfs_radio != 'all':
+            models_to_include = [model for model in models_to_include if (all_models[model]['model'] != 'label model' or all_models[model]['label_source'] == lfs_radio)]
+        col2.radio('Issues', ['with issues', 'without issues', 'all'], key="issues", index=2)
+        issues_radio = st.session_state['issues']
+        if issues_radio != 'all':
+            models_to_include = [model for model in models_to_include if (all_models[model]['model'] != 'label model' or all_models[model]['issues'] == issues_radio)]
+    else:
+        models_to_include = [model for model in models_to_include if all_models[model]['model'] != 'label model']
 
-    col2.radio('Issues', ['with issues', 'without issues', 'all'], key="issues", index=2)
-    issues = st.session_state.issues
-    if issues != 'all':
-        filtered_models = [model for model in filtered_models if predefined_models[model]['issues'] == issues]
+    st.checkbox('Include transformer models', value=True, key='include_transformer_models')
+    if st.session_state['include_transformer_models']:
+        col1, col2, col3 = st.columns(3)
+        col1.radio('Labels from label model trained on lfs:', ['keywords', 'all heuristics', 'gitcproc', 'gitcproc_orig', 'all'],
+                   key="label_source", index=4,
+                   help='keywords: only keyword heuristics\n\n'
+                        'all heuristics: keywords + file metrics + transformer trained on conventional commits\n\n'
+                        'gitcproc:  9 "bugfix" keyword heuristics, "non-bugfix" if none matched\n\n'
+                        'gitcproc_orig: 9 "bugfix" keyword heuristics, abstain if none matched')
+        label_source = st.session_state.label_source
+        if label_source != 'all':
+            models_to_include = [model for model in models_to_include if (all_models[model]['model'] != 'transformer' or all_models[model]['label_source'] == label_source)]
 
-    col3.radio('Model', ['label model', 'transformer', 'all'], key="model", index=2)
-    model1 = st.session_state.model
-    if model1 != 'all':
-        filtered_models = [model for model in filtered_models if predefined_models[model]['model'] == model1]
+        col2.radio('Issues', ['with issues', 'without issues', 'all'], key="issues1", index=2)
+        issues = st.session_state.issues1
+        if issues != 'all':
+            models_to_include = [model for model in models_to_include if (all_models[model]['model'] != 'transformer' or all_models[model]['issues'] == issues)]
 
-    if model1 in ['all', 'transformer']:
-        col4.radio('Transformer trained on', ['only message', 'only change', 'message and change', 'all'], key="input_data", index=3)
+        col3.radio('Transformer trained on', ['only message', 'only change', 'message and change', 'all'], key="input_data", index=3)
         input_data = st.session_state['input_data']
         if input_data != 'all':
-            filtered_models = [model for model in filtered_models if ('trained_on' not in predefined_models[model] or predefined_models[model]['trained_on'] == input_data)]
-    return filtered_models
+            models_to_include = [model for model in models_to_include if (all_models[model]['model'] != 'transformer' or all_models[model]['trained_on'] == input_data)]
+    else:
+        models_to_include = [model for model in models_to_include if all_models[model]['model'] != 'transformer']
+    return models_to_include
 
 
 def display_model_perf_on_ind_data_points(models, dataset, indices, lf_name, lf_value):
@@ -255,11 +273,12 @@ def display_model_metrics(models, selected_datasets, indices, lf_name, lf_value)
 
     ind = MultiIndex.from_tuples([(
                                      model,
+                                     predefined_models[model]['model'],
                                      predefined_models[model]['label_source'],
                                      predefined_models[model]['issues'],
-                                     predefined_models[model]['model'],
+
                                      predefined_models[model]['trained_on'] if 'trained_on' in predefined_models[model] else 'N/A',
-                                 ) for model in models], names=['id', 'label source', 'issues', 'model', 'trained on'])
+                                 ) for model in models], names=['id', 'model', 'label source', 'issues', 'trained on'])
     metrics_dataframe = pd.DataFrame(matrix, index=ind, columns=selected_datasets)
     metrics_dataframe = metrics_dataframe.sort_values(by=selected_datasets[0], inplace=False)
     if st.session_state.rel_imp:
@@ -396,13 +415,13 @@ def main():
 
     st.write('## Performance of models')
 
-    filtered_models = display_model_filter_ui(predefined_models.keys())
+    filtered_models = display_model_filter_ui(predefined_models)
     selected_datasets, subset_criterion = choose_datasets_ui(datasets_with_labels, lfs, 'model_perf')
     indices = None
     if subset_criterion is not None:
         indices = {dataset: get_fired_indexes(dataset, subset_criterion[0], subset_criterion[1]) for dataset in selected_datasets}
     if len(filtered_models) == 0:
-        st.warning('No selected model satisfies chosen conditions.')
+        st.warning('No model satisfying chosen conditions found.')
     elif len(selected_datasets) == 0:
         st.warning('No datasets selected.')
     else:
