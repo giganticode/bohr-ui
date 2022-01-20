@@ -1,4 +1,5 @@
-from typing import Dict, Optional, Tuple
+import random
+from typing import Dict, Optional, Tuple, List, Iterable
 
 import pandas as pd
 import streamlit as st
@@ -20,14 +21,14 @@ st.set_page_config(
     layout="wide",
 )
 
-from config import predefined_models, datasets_with_labels, datasets_without_labels, get_mnemonic_for_dataset
+from config import datasets_with_labels, datasets_without_labels, get_mnemonic_for_dataset, label_models_metadata
 from data import read_labeled_dataset, get_dataset, compute_lf_coverages, compute_metric, get_fired_indexes, get_lfs, \
-    bohr_repo, load_used_bohr_commit_sha
+    bohr_repo, load_used_bohr_commit_sha, load_transformer_metadata, ModelMetadata
 
 cm = sns.light_palette("green", as_cmap=True)
 
 
-def datapoints_subset_ui(lfs, prefix, default_indices: Optional[Tuple[int, int]]=None):
+def datapoints_subset_ui(lfs, prefix, default_indices: Optional[Tuple[int, int]] = None) -> Optional[Tuple[str, int]]:
     col1, col2, col3 = st.columns(3)
     col1.checkbox('Subset of data points', value=False, key=f'{prefix}.dataset_subset',
                   help='Limit to those data points on which a specific LF was fired.\n\n'
@@ -46,7 +47,7 @@ def datapoints_subset_ui(lfs, prefix, default_indices: Optional[Tuple[int, int]]
     return None
 
 
-def choose_dataset_ui(datasets, lfs, prefix, default_indices=None):
+def choose_signle_dataset_ui(datasets, lfs, prefix, default_indices = None) -> Tuple[str, Optional[Tuple[str, int]]]:
     chosen_dataset = st.selectbox('Select dataset to be analyzed:', datasets, key=f'{prefix}.msl', index=default_indices[0] if default_indices else 0, format_func=get_mnemonic_for_dataset)
     res = None
     if chosen_dataset is not None:
@@ -54,7 +55,7 @@ def choose_dataset_ui(datasets, lfs, prefix, default_indices=None):
     return chosen_dataset, res
 
 
-def choose_datasets_ui(datasets, lfs, prefix):
+def choose_datasets_ui(datasets, lfs, prefix) -> Tuple[List[str], Optional[Tuple[str, int]]]:
     chosen_datasets = st.multiselect('Select dataset(s) to be analyzed:', options=datasets, default=datasets[:1], key=f'{prefix}.msl', format_func=get_mnemonic_for_dataset)
     res = None
     if len(chosen_datasets) > 0:
@@ -62,7 +63,7 @@ def choose_datasets_ui(datasets, lfs, prefix):
     return chosen_datasets, res
 
 
-def display_coverage(lfs):
+def display_coverage(lfs) -> None:
     try:
         chosen_datasets, subset_criterion = choose_datasets_ui(datasets_with_labels + datasets_without_labels, lfs, 'lf_coverage')
         indices = None
@@ -96,12 +97,11 @@ def display_coverage(lfs):
         st.exception(ex)
 
 
-def display_model_filter_ui(all_models):
-    models_to_include = all_models.keys()
+def display_label_model_filter_ui(all_label_models: List[ModelMetadata]) -> List[ModelMetadata]:
 
     st.checkbox('Include label models', value=False, key='include_label_models')
     if st.session_state['include_label_models']:
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4, col5 = st.columns(5)
         col1.radio('Labeling functions', ['keywords', 'all heuristics', 'gitcproc', 'gitcproc_orig', 'all'],
                    key="labeling_functions", index=4,
                    help='keywords: only keyword heuristics\n\n'
@@ -110,17 +110,25 @@ def display_model_filter_ui(all_models):
                         'gitcproc_orig: 9 "bugfix" keyword heuristics, abstain if none matched')
         lfs_radio = st.session_state['labeling_functions']
         if lfs_radio != 'all':
-            models_to_include = [model for model in models_to_include if (all_models[model]['model'] != 'label model' or all_models[model]['label_source'] == lfs_radio)]
+            all_label_models = [model for model in all_label_models if (model['label_source'] == lfs_radio)]
         col2.radio('Issues', ['with issues', 'without issues', 'all'], key="issues", index=2)
         issues_radio = st.session_state['issues']
         if issues_radio != 'all':
-            models_to_include = [model for model in models_to_include if (all_models[model]['model'] != 'label model' or all_models[model]['issues'] == issues_radio)]
+            all_label_models = [model for model in all_label_models if (model['issues'] == issues_radio)]
+        col3.radio('Train set', ['commits_200k_files', 'commits_200k_files_no_merges', 'all'], key="train_set", index=2)
+        train_set = st.session_state['train_set']
+        if train_set != 'all':
+            all_label_models = [model for model in all_label_models if (model['train_dataset'] == train_set)]
     else:
-        models_to_include = [model for model in models_to_include if all_models[model]['model'] != 'label model']
+        all_label_models = []
+    return all_label_models
+
+
+def display_transformer_filter_ui(all_transformer_models: Iterable[ModelMetadata]) -> List[ModelMetadata]:
 
     st.checkbox('Include transformer models', value=True, key='include_transformer_models')
     if st.session_state['include_transformer_models']:
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4, col5 = st.columns(5)
         col1.radio('Labels from label model trained on lfs:', ['keywords', 'all heuristics', 'gitcproc', 'gitcproc_orig', 'all'],
                    key="label_source", index=4,
                    help='keywords: only keyword heuristics\n\n'
@@ -129,26 +137,35 @@ def display_model_filter_ui(all_models):
                         'gitcproc_orig: 9 "bugfix" keyword heuristics, abstain if none matched')
         label_source = st.session_state.label_source
         if label_source != 'all':
-            models_to_include = [model for model in models_to_include if (all_models[model]['model'] != 'transformer' or all_models[model]['label_source'] == label_source)]
+            all_transformer_models = [model for model in all_transformer_models if (model['label_source'] == label_source)]
 
         col2.radio('Issues', ['with issues', 'without issues', 'all'], key="issues1", index=2)
         issues = st.session_state.issues1
         if issues != 'all':
-            models_to_include = [model for model in models_to_include if (all_models[model]['model'] != 'transformer' or all_models[model]['issues'] == issues)]
+            all_transformer_models = [model for model in all_transformer_models if (model['issues'] == issues)]
 
-        col3.radio('Transformer trained on', ['only message', 'only change', 'message and change', 'all'], key="input_data", index=3)
+        col3.radio('Train set', ['commits_200k_files', 'commits_200k_files_no_merges', 'all'], key="train_set1", index=2)
+        train_set = st.session_state['train_set1']
+        if train_set != 'all':
+            all_transformer_models = [model for model in all_transformer_models if (model['train_dataset'] == train_set)]
+
+        col4.radio('Transformer trained on', ['only message', 'only change', 'message and change', 'all'], key="input_data", index=3)
         input_data = st.session_state['input_data']
         if input_data != 'all':
-            models_to_include = [model for model in models_to_include if (all_models[model]['model'] != 'transformer' or all_models[model]['trained_on'] == input_data)]
+            all_transformer_models = [model for model in all_transformer_models if (model['trained_on'] == input_data)]
+        col5.checkbox('Include soft labels', key='soft_labels', value=True)
+        if not st.session_state['soft_labels']:
+            all_transformer_models = [model for model in all_transformer_models if not model['soft_labels']]
     else:
-        models_to_include = [model for model in models_to_include if all_models[model]['model'] != 'transformer']
-    return models_to_include
+        all_transformer_models = []
+    return all_transformer_models
 
 
-def display_model_perf_on_ind_data_points(models, dataset, indices, lf_name, lf_value):
+def display_model_perf_on_ind_data_points(models: List[ModelMetadata], dataset_name: str, indices, lf_name, lf_value):
     n_exp = len(models)
-    for i, model in enumerate(models):
-        raw_df = read_labeled_dataset(model, dataset, indices if indices is not None else None)
+    for i, model_metadata in enumerate(models):
+        model_name = model_metadata['name']
+        raw_df = read_labeled_dataset(model_metadata, dataset_name, indices if indices is not None else None)
         if raw_df.empty:
             st.info('No datapoints found.')
             return
@@ -162,40 +179,41 @@ def display_model_perf_on_ind_data_points(models, dataset, indices, lf_name, lf_
             st.session_state['ind_perf_metrics'] = 'accuracy'
         if st.session_state['ind_perf_metrics'] == 'accuracy':
             if 'label' in raw_df.columns:
-                prep_df.loc[:, model] = 1 - (raw_df["prob_CommitLabel.BugFix"] - raw_df["label"]).abs()
+                prep_df.loc[:, model_name] = 1 - (raw_df["prob_CommitLabel.BugFix"] - raw_df["label"]).abs()
             else:
                 raise ValueError('Cannot calc accuracy for dataset without ground truth labels')
         elif st.session_state['ind_perf_metrics'] == 'probability':
-            prep_df.loc[:, model] = raw_df["prob_CommitLabel.BugFix"]
+            prep_df.loc[:, model_name] = raw_df["prob_CommitLabel.BugFix"]
         else:
             raise ValueError(f'Unknown value {st.session_state.ind_perf_metrics}')
 
+    model_names = list(map(lambda m: m['name'], models))
     chosen_metric = st.session_state['ind_perf_metrics']
     if chosen_metric == 'accuracy':
-        prep_df.loc[:, 'how_often_precise'] = prep_df[models].apply(lambda row: (row > 0.5).sum() / float(n_exp), axis=1)
+        prep_df.loc[:, 'how_often_precise'] = prep_df[model_names].apply(lambda row: (row > 0.5).sum() / float(n_exp), axis=1)
         sort_columns=['how_often_precise', 'variance']
     elif chosen_metric == 'probability':
-        precision = 1 - (prep_df[models].sub(prep_df["true label"], axis=0)).abs()
+        precision = 1 - (prep_df[model_names].sub(prep_df["true label"], axis=0)).abs()
         prep_df.loc[:, 'how_often_precise'] = precision.apply(lambda row: (row > 0.5).sum() / float(n_exp), axis=1)
         sort_columns=['variance']
     else:
         raise ValueError(f'Unknown metric: {st.session_state["ind_perf_metrics"]}')
-    prep_df.loc[:, 'variance'] = prep_df[models].apply(lambda row: np.var(row), axis=1)
+    prep_df.loc[:, 'variance'] = prep_df[model_names].apply(lambda row: np.var(row), axis=1)
 
     prep_df.sort_values(sort_columns, inplace=True, ascending=True)
 
-    df_styler = prep_df.style.format({key: "{:.2%}" for key in list(models) + ['variance', 'how_often_precise']})
+    df_styler = prep_df.style.format({key: "{:.2%}" for key in list(model_names) + ['variance', 'how_often_precise']})
     df_styler = df_styler.background_gradient(cmap=cm)
 
-    desc = format_subset_description(dataset, lf_name, lf_value, len(prep_df))
+    desc = format_subset_description(dataset_name, lf_name, lf_value, len(prep_df))
     st.write(desc)
     st.write(df_styler)
     st.radio('', ['accuracy', 'probability'], key='ind_perf_metrics', format_func=format_indiv_radio)
     st.download_button('Download', data=prep_df.to_csv(), file_name='preformance_data_points.csv')
 
 
-def format_subset_description(dataset, lf_name, lf_value, n_datapoints):
-    desc = f'`Displaying data points from dataset {dataset}'
+def format_subset_description(dataset_name: str, lf_name: str, lf_value: int, n_datapoints: int):
+    desc = f'`Displaying data points from dataset {dataset_name}'
     if lf_name is not None:
         desc += f' [{lf_name} == {lf_value}]'
     desc += f', n datapoints: {n_datapoints}`'
@@ -233,7 +251,7 @@ def format_normalization_labels(s):
     return map[s]
 
 
-def display_confusion_matrix(models, selected_datasets, indices, lf_name, lf_value):
+def display_confusion_matrix(label_models: List[ModelMetadata], transformers: List[ModelMetadata], selected_datasets, indices, lf_name, lf_value):
     st.radio('Normalization', options=['None', 'true', 'pred', 'all'], key='normalize', format_func=format_normalization_labels)
     normalize = st.session_state['normalize']
     if normalize == 'None':
@@ -243,27 +261,22 @@ def display_confusion_matrix(models, selected_datasets, indices, lf_name, lf_val
         if lf_name is not None:
             dataset_description += f'[{lf_name} == {lf_value}]'
         st.write(f"#### {dataset_description}")
-        layout = get_layout_for_confusion(len(models))
+        layout = get_layout_for_confusion(len(label_models) + len(transformers))
         cols = [c for row in layout for c in st.columns(row)]
-        for i, model in enumerate(models):
+        for i, model in enumerate(label_models + transformers ):
             confusion(dataset, model, indices, normalize, cols[i])
 
 
-def display_model_metrics(models, selected_datasets, indices, lf_name, lf_value):
-    if 'metric' not in st.session_state:
-        st.session_state['metric'] = 'accuracy'
-    if 'rel_imp' not in st.session_state:
-        st.session_state['rel_imp'] = False
-    if 'comp_mode' not in st.session_state:
-        st.session_state['comp_mode'] = 'compare to baseline'
+def create_metrics_dataframe(label_models: List[ModelMetadata], transformers: List[ModelMetadata], selected_datasets: List[str], indices) -> pd.DataFrame:
+    models = label_models + transformers
     matrix = []
-    for model in models:
+    for model_metadata in models:
         row = []
-        st.spinner(f'Computing metrics for model `{model}`')
-        for dataset in selected_datasets:
-            st.spinner(f'Computing metrics for dataset `{dataset}`')
-            abstains_present = predefined_models[model]['model'] == 'label model'
-            df = read_labeled_dataset(model, dataset, indices[dataset] if indices is not None else None)
+        st.spinner(f'Computing metrics for model `{model_metadata["name"]}`')
+        for dataset_name in selected_datasets:
+            st.spinner(f'Computing metrics for dataset `{dataset_name}`')
+            abstains_present = model_metadata['model'] == 'label model'
+            df = read_labeled_dataset(model_metadata, dataset_name, indices[dataset_name] if indices is not None else None)
             if not df.empty:
                 res = compute_metric(df, st.session_state.metric, abstains_present)
             else:
@@ -271,19 +284,41 @@ def display_model_metrics(models, selected_datasets, indices, lf_name, lf_value)
             row.append(res)
         matrix.append(row)
 
-    ind = MultiIndex.from_tuples([(
-                                     model,
-                                     predefined_models[model]['model'],
-                                     predefined_models[model]['label_source'],
-                                     predefined_models[model]['issues'],
+    label_model_index_tuples = [(
+        model['name'],
+        model['model'],
+        model['label_source'],
+        model['issues'],
+        model['train_dataset'],
+        'N/A',
+    ) for model in label_models]
 
-                                     predefined_models[model]['trained_on'] if 'trained_on' in predefined_models[model] else 'N/A',
-                                 ) for model in models], names=['id', 'model', 'label source', 'issues', 'trained on'])
+    transformer_index_tuples = [(
+        model['name'],
+        model['model'],
+        model['label_source'],
+        model['issues'],
+        model['train_dataset'],
+        model['trained_on'],
+    ) for model in transformers]
+    ind = MultiIndex.from_tuples(label_model_index_tuples + transformer_index_tuples, names=['id', 'model', 'label source', 'issues', 'trained on', 'dataset type'])
     metrics_dataframe = pd.DataFrame(matrix, index=ind, columns=selected_datasets)
     metrics_dataframe = metrics_dataframe.sort_values(by=selected_datasets[0], inplace=False)
+    return metrics_dataframe
+
+
+def display_model_metrics(label_models: List[ModelMetadata], transformers: List[ModelMetadata], selected_datasets: List[str], indices, lf_name: str, lf_value: int) -> List[ModelMetadata]:
+    if 'metric' not in st.session_state:
+        st.session_state['metric'] = 'accuracy'
+    if 'rel_imp' not in st.session_state:
+        st.session_state['rel_imp'] = False
+    if 'comp_mode' not in st.session_state:
+        st.session_state['comp_mode'] = 'compare to baseline'
+
+    metrics_dataframe = create_metrics_dataframe(label_models, transformers, selected_datasets, indices)
     if st.session_state.rel_imp:
         metrics_dataframe = convert_metrics_to_relative(metrics_dataframe)
-    metrics_dataframe.reset_index(level=[1,2,3,4], inplace=True)
+    metrics_dataframe.reset_index(level=[1, 2, 3, 4, 5], inplace=True)
     metrics_styler = metrics_dataframe.style.format({key: "{:.2%}" for key in selected_datasets})
     if st.session_state.rel_imp:
         metrics_styler = metrics_styler.background_gradient(cmap=sns.blend_palette("rg", as_cmap=True), vmin=-0.3, vmax=0.2, )
@@ -297,10 +332,10 @@ def display_model_metrics(models, selected_datasets, indices, lf_name, lf_value)
     c2.checkbox(label="Show relative improvement", value=False, key='rel_imp')
     if st.session_state.rel_imp:
         c2.radio('', ['compare to baseline', 'compare to previous model'], key='comp_mode')
-    st.checkbox('Show confiusion matrix(es)', value=False, key='conf_matrix_checkbox')
+    st.checkbox('Show confusion matrix(es)', value=False, key='conf_matrix_checkbox')
     if st.session_state['conf_matrix_checkbox']:
-        display_confusion_matrix(models, selected_datasets, indices, lf_name, lf_value)
-    return list(metrics_dataframe.index)
+        display_confusion_matrix(label_models, transformers, selected_datasets, indices, lf_name, lf_value)
+    return [model_metadata for model_metadata in label_models + transformers if model_metadata['name'] in list(metrics_dataframe.index)]
 
 
 def display_datapoint_search_ui(dataset):
@@ -392,22 +427,24 @@ def plot_confusion_matrix(y_true, y_pred,
     return ax
 
 
-def confusion(dataset, model, indices, normalize, handle):
-    labeled_dataset = read_labeled_dataset(model, dataset, indices[dataset] if indices is not None else None)
+def confusion(dataset_name: str, model_metadata: ModelMetadata, indices, normalize, handle):
+    labeled_dataset = read_labeled_dataset(model_metadata, dataset_name, indices[dataset_name] if indices is not None else None)
     if labeled_dataset.empty:
         handle.write('No datapoints.')
         return
     predicted_continuous = labeled_dataset['prob_CommitLabel.BugFix']
     predicted = (predicted_continuous > 0.5).astype(int)
     ax= plt.subplot()
-    title_details = "\n".join(predefined_models[model].values())
-    title = f'{model}\n\n{title_details}'
+    title_details = "\n".join(model_metadata.values())
+    title = f'{model_metadata["name"]}\n\n{title_details}'
     disp = plot_confusion_matrix(labeled_dataset['label'], predicted, normalize=normalize, title=title, ax=ax)
 
     handle.pyplot(disp.figure)
 
 
 def main():
+    random.seed(13)
+    np.random.seed(42)
     lfs = get_lfs(datasets_with_labels[-1])
 
     st.write('## Assignment of labels by labeling functions (LFs)')
@@ -415,7 +452,10 @@ def main():
 
     st.write('## Performance of models')
 
-    filtered_models = display_model_filter_ui(predefined_models)
+    transformer_metadata = load_transformer_metadata()
+    filtered_label_models = display_label_model_filter_ui(label_models_metadata)
+    filtered_transformers = display_transformer_filter_ui(list(transformer_metadata.values()))
+    filtered_models = filtered_label_models + filtered_transformers
     selected_datasets, subset_criterion = choose_datasets_ui(datasets_with_labels, lfs, 'model_perf')
     indices = None
     if subset_criterion is not None:
@@ -426,7 +466,7 @@ def main():
         st.warning('No datasets selected.')
     else:
         lf_name, lf_value = subset_criterion if subset_criterion is not None else (None, None)
-        filtered_models = display_model_metrics(filtered_models, selected_datasets, indices, lf_name, lf_value)
+        filtered_models = display_model_metrics(filtered_label_models, filtered_transformers, selected_datasets, indices, lf_name, lf_value)
 
     st.write('## Debugging individual data points')
     default_indices = (
@@ -434,7 +474,7 @@ def main():
         lfs.index(st.session_state[f'model_perf.heuristic']) if f'model_perf.heuristic' in st.session_state else 0,
         st.session_state[f'model_perf.value'] if f'model_perf.value' in st.session_state else 0,
     )
-    selected_dataset, subset_criterion = choose_dataset_ui(datasets_with_labels, lfs, 'model_perf_ind', default_indices)
+    selected_dataset, subset_criterion = choose_signle_dataset_ui(datasets_with_labels, lfs, 'model_perf_ind', default_indices)
     indices = None
     lf_name = None
     lf_value = None

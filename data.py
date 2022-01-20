@@ -1,6 +1,7 @@
+import json
 import re
 import subprocess
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, NewType, Any
 
 import jsonlines as jsonlines
 import streamlit as st
@@ -13,7 +14,7 @@ from sklearn.metrics import f1_score
 
 from tqdm import tqdm
 
-from config import predefined_models, get_mnemonic_for_dataset
+from config import get_mnemonic_for_dataset
 from vcs import get_path_to_revision
 
 bohr_bugginess_repo = 'https://github.com/giganticode/bohr-workdir-bugginess'
@@ -25,6 +26,8 @@ DATASET_DEBUGGING_EXPERIMENT = 'dataset_debugging'
 CHUNK_SIZE = 10000
 TRANSFORMER_REGEX = re.compile('fine_grained_changes_transformer_(\\d+)')
 KEYWORD_REGEX = re.compile('bug.*_message_keyword_(.*)')
+
+ModelMetadata = NewType('ModelMetadata', Dict[str, Any])
 
 
 @st.cache(show_spinner=False)
@@ -54,14 +57,16 @@ def get_label_matrix(dataset_name: str) -> pd.DataFrame:
 
 
 @st.cache(allow_output_mutation=True, show_spinner=False)
-def read_labeled_dataset(model, selected_dataset, indices):
-    with st.spinner(f'Loading labels by model `{model}` for dataset `{selected_dataset}`'):
-        if predefined_models[model]['model'] == 'label model':
-            df = read_labeled_dataset_from_bohr(model, selected_dataset)
-        elif predefined_models[model]['model'] == 'transformer':
-            df = read_labeled_dataset_from_transformers(model, selected_dataset)
+def read_labeled_dataset(model_metadata: ModelMetadata, selected_dataset_name: str, indices):
+    model_name = model_metadata["name"]
+    model_type = model_metadata['model']
+    with st.spinner(f'Loading labels by model `{model_name}` for dataset `{selected_dataset_name}`'):
+        if model_type == 'label model':
+            df = read_labeled_dataset_from_bohr(model_name, selected_dataset_name)
+        elif model_type == 'transformer':
+            df = read_labeled_dataset_from_transformers(model_name, selected_dataset_name)
         else:
-            raise ValueError(f'Unknown model type: {predefined_models[model]["model"]}')
+            raise ValueError(f'Unknown model type: {model_type}')
     return df.iloc[indices, :] if indices is not None else df
 
 
@@ -74,9 +79,25 @@ def get_fired_indexes(dataset, heuristic, value):
 
 
 @st.cache(show_spinner=False)
-def read_labeled_dataset_from_transformers(model, selected_dataset):
+def load_transformer_metadata() -> Dict[str, ModelMetadata]:
+    path_to_revision = get_path_to_revision(diff_classifier_repo, 'master', True)
+    full_path = path_to_revision / 'models'
+    res = {}
+    with st.spinner(f'Reading models metadata from `{bohr_bugginess_repo}`'):
+        for model_dir in full_path.iterdir():
+            path = model_dir / 'task.metadata'
+            if not path.exists():
+                continue
+            with open(path) as f:
+                dct = json.load(f)
+                res[dct['name']] = dct
+    return res
+
+
+@st.cache(show_spinner=False)
+def read_labeled_dataset_from_transformers(model_name: str, selected_dataset):
     label_to_int = {'NonBugFix': 0, 'BugFix': 1}
-    path = f'models/{model}/assigned_labels_{selected_dataset}.csv'
+    path = f'models/{model_name}/assigned_labels_{selected_dataset}.csv'
     with st.spinner(f'Reading `{path}` from `{diff_classifier_repo}`'):
         with dvc.api.open(path, repo=diff_classifier_repo) as f:
             df = pd.read_csv(f).rename(columns={'true_label': 'label'}, inplace=False)
@@ -91,9 +112,9 @@ def read_labeled_dataset_from_transformers(model, selected_dataset):
 
 
 @st.cache(show_spinner=False)
-def read_labeled_dataset_from_bohr(model, selected_dataset):
+def read_labeled_dataset_from_bohr(model_name: str, selected_dataset_name: str):
     label_to_int = {'CommitLabel.NonBugFix': 0, 'CommitLabel.BugFix': 1}
-    path = f'runs/bugginess/{model}/{selected_dataset}/labeled.csv'
+    path = f'runs/bugginess/{model_name}/{selected_dataset_name}/labeled.csv'
     path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', True)
     subprocess.run(["dvc", "pull", path], cwd=path_to_revision)
     full_path = f'{path_to_revision}/{path}'
