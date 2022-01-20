@@ -162,10 +162,15 @@ def display_transformer_filter_ui(all_transformer_models: Iterable[ModelMetadata
 
 
 def display_model_perf_on_ind_data_points(models: List[ModelMetadata], dataset_name: str, indices, lf_name, lf_value):
-    n_exp = len(models)
+    n_exp = 0
     for i, model_metadata in enumerate(models):
         model_name = model_metadata['name']
-        raw_df = read_labeled_dataset(model_metadata, dataset_name, indices if indices is not None else None)
+        try:
+            raw_df = read_labeled_dataset(model_metadata, dataset_name, indices if indices is not None else None)
+        except DatasetNotFound:
+            st.warning(f'Dataset was not found: {ex}, skipping model: {model_metadata["name"]}')
+            continue
+        n_exp += 1
         if raw_df.empty:
             st.info('No datapoints found.')
             return
@@ -437,14 +442,18 @@ def plot_confusion_matrix(y_true, y_pred,
 
 
 def confusion(dataset_name: str, model_metadata: ModelMetadata, indices, normalize, handle):
-    labeled_dataset = read_labeled_dataset(model_metadata, dataset_name, indices[dataset_name] if indices is not None else None)
+    try:
+        labeled_dataset = read_labeled_dataset(model_metadata, dataset_name, indices[dataset_name] if indices is not None else None)
+    except DatasetNotFound:
+        handle.write(f'Model {model_metadata["name"]} is not found.')
+        return
     if labeled_dataset.empty:
         handle.write('No datapoints.')
         return
     predicted_continuous = labeled_dataset['prob_CommitLabel.BugFix']
     predicted = (predicted_continuous > 0.5).astype(int)
     ax= plt.subplot()
-    title_details = "\n".join(model_metadata.values())
+    title_details = "\n".join(map(lambda m: str(m), model_metadata.values()))
     title = f'{model_metadata["name"]}\n\n{title_details}'
     disp = plot_confusion_matrix(labeled_dataset['label'], predicted, normalize=normalize, title=title, ax=ax)
 
