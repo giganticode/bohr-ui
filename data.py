@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 import dvc.api
 from bohrruntime.core import load_workspace
+from dvc.exceptions import PathMissingError
 from sklearn.metrics import f1_score
 
 from tqdm import tqdm
@@ -94,13 +95,22 @@ def load_transformer_metadata() -> Dict[str, ModelMetadata]:
     return res
 
 
+class DatasetNotFound(Exception):
+    def __init__(self, repo, path):
+        self.repo = repo
+        self.path = path
+
+
 @st.cache(show_spinner=False)
 def read_labeled_dataset_from_transformers(model_name: str, selected_dataset):
     label_to_int = {'NonBugFix': 0, 'BugFix': 1}
     path = f'models/{model_name}/assigned_labels_{selected_dataset}.csv'
-    with st.spinner(f'Reading `{path}` from `{diff_classifier_repo}`'):
-        with dvc.api.open(path, repo=diff_classifier_repo) as f:
-            df = pd.read_csv(f).rename(columns={'true_label': 'label'}, inplace=False)
+    try:
+        with st.spinner(f'Reading `{path}` from `{diff_classifier_repo}`'):
+            with dvc.api.open(path, repo=diff_classifier_repo) as f:
+                df = pd.read_csv(f).rename(columns={'true_label': 'label'}, inplace=False)
+    except PathMissingError as ex:
+        raise DatasetNotFound(diff_classifier_repo, path) from ex
     if 'label' in df.columns:
         df.loc[:, 'label'] = df.apply(lambda row: label_to_int[row["label"]], axis=1)
     else:

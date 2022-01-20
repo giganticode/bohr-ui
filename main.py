@@ -23,7 +23,7 @@ st.set_page_config(
 
 from config import datasets_with_labels, datasets_without_labels, get_mnemonic_for_dataset, label_models_metadata
 from data import read_labeled_dataset, get_dataset, compute_lf_coverages, compute_metric, get_fired_indexes, get_lfs, \
-    bohr_repo, load_used_bohr_commit_sha, load_transformer_metadata, ModelMetadata
+    bohr_repo, load_used_bohr_commit_sha, load_transformer_metadata, ModelMetadata, DatasetNotFound
 
 cm = sns.light_palette("green", as_cmap=True)
 
@@ -270,19 +270,24 @@ def display_confusion_matrix(label_models: List[ModelMetadata], transformers: Li
 def create_metrics_dataframe(label_models: List[ModelMetadata], transformers: List[ModelMetadata], selected_datasets: List[str], indices) -> pd.DataFrame:
     models = label_models + transformers
     matrix = []
+    excluded_models = []
     for model_metadata in models:
         row = []
         st.spinner(f'Computing metrics for model `{model_metadata["name"]}`')
-        for dataset_name in selected_datasets:
-            st.spinner(f'Computing metrics for dataset `{dataset_name}`')
-            abstains_present = model_metadata['model'] == 'label model'
-            df = read_labeled_dataset(model_metadata, dataset_name, indices[dataset_name] if indices is not None else None)
-            if not df.empty:
-                res = compute_metric(df, st.session_state.metric, abstains_present)
-            else:
-                res = np.nan
-            row.append(res)
-        matrix.append(row)
+        try:
+            for dataset_name in selected_datasets:
+                st.spinner(f'Computing metrics for dataset `{dataset_name}`')
+                abstains_present = model_metadata['model'] == 'label model'
+                df = read_labeled_dataset(model_metadata, dataset_name, indices[dataset_name] if indices is not None else None)
+                if not df.empty:
+                    res = compute_metric(df, st.session_state.metric, abstains_present)
+                else:
+                    res = np.nan
+                row.append(res)
+            matrix.append(row)
+        except DatasetNotFound as ex:
+            st.warning(f'Dataset was not found: {ex}, skipping model: {model_metadata["name"]}')
+            excluded_models.append(model_metadata)
 
     label_model_index_tuples = [(
         model['name'],
@@ -291,7 +296,9 @@ def create_metrics_dataframe(label_models: List[ModelMetadata], transformers: Li
         model['issues'],
         model['train_dataset'],
         'N/A',
-    ) for model in label_models]
+        'N/A',
+        'N/A',
+    ) for model in label_models if model not in excluded_models]
 
     transformer_index_tuples = [(
         model['name'],
@@ -300,8 +307,10 @@ def create_metrics_dataframe(label_models: List[ModelMetadata], transformers: Li
         model['issues'],
         model['train_dataset'],
         model['trained_on'],
-    ) for model in transformers]
-    ind = MultiIndex.from_tuples(label_model_index_tuples + transformer_index_tuples, names=['id', 'model', 'label source', 'issues', 'trained on', 'dataset type'])
+        model['soft_labels'],
+        model['augmentation'],
+    ) for model in transformers if model not in excluded_models]
+    ind = MultiIndex.from_tuples(label_model_index_tuples + transformer_index_tuples, names=['id', 'model', 'label source', 'issues', 'trained on', 'dataset type', 'soft labels', 'data aug'])
     metrics_dataframe = pd.DataFrame(matrix, index=ind, columns=selected_datasets)
     metrics_dataframe = metrics_dataframe.sort_values(by=selected_datasets[0], inplace=False)
     return metrics_dataframe
@@ -318,7 +327,7 @@ def display_model_metrics(label_models: List[ModelMetadata], transformers: List[
     metrics_dataframe = create_metrics_dataframe(label_models, transformers, selected_datasets, indices)
     if st.session_state.rel_imp:
         metrics_dataframe = convert_metrics_to_relative(metrics_dataframe)
-    metrics_dataframe.reset_index(level=[1, 2, 3, 4, 5], inplace=True)
+    metrics_dataframe.reset_index(level=[1, 2, 3, 4, 5, 6, 7], inplace=True)
     metrics_styler = metrics_dataframe.style.format({key: "{:.2%}" for key in selected_datasets})
     if st.session_state.rel_imp:
         metrics_styler = metrics_styler.background_gradient(cmap=sns.blend_palette("rg", as_cmap=True), vmin=-0.3, vmax=0.2, )
