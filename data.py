@@ -128,10 +128,13 @@ def read_labeled_dataset_from_bohr(model_name: str, selected_dataset_name: str):
     path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', True)
     subprocess.run(["dvc", "pull", path], cwd=path_to_revision)
     full_path = f'{path_to_revision}/{path}'
-    with st.spinner(f'Reading `{full_path}` from `{bohr_bugginess_repo}`'):
-        print(f'Reading labeled dataset from bohr repo at: {full_path}')
-        with open(full_path) as f:
-            df = pd.read_csv(f)
+    try:
+        with st.spinner(f'Reading `{full_path}` from `{bohr_bugginess_repo}`'):
+            print(f'Reading labeled dataset from bohr repo at: {full_path}')
+            with open(full_path) as f:
+                df = pd.read_csv(f)
+    except FileNotFoundError as ex:
+        raise DatasetNotFound(diff_classifier_repo, path) from ex
     if 'label' in df.columns:
         df.loc[:, 'label'] = df.apply(lambda row: label_to_int[row["label"]], axis=1)
     return df
@@ -216,6 +219,10 @@ def compute_lf_coverages(dataset_ids, indexes: Optional[Dict[str, List[int]]] = 
 
 
 class TrueLabelNotFound(Exception):
+    pass
+
+
+class NoDatapointsFound(Exception):
     pass
 
 

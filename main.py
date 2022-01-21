@@ -23,7 +23,8 @@ st.set_page_config(
 
 from config import datasets_with_labels, datasets_without_labels, get_mnemonic_for_dataset, label_models_metadata
 from data import read_labeled_dataset, get_dataset, compute_lf_coverages, compute_metric, get_fired_indexes, get_lfs, \
-    bohr_repo, load_used_bohr_commit_sha, load_transformer_metadata, ModelMetadata, DatasetNotFound
+    bohr_repo, load_used_bohr_commit_sha, load_transformer_metadata, ModelMetadata, DatasetNotFound, TrueLabelNotFound, \
+    NoDatapointsFound
 
 cm = sns.light_palette("green", as_cmap=True)
 
@@ -161,19 +162,18 @@ def display_transformer_filter_ui(all_transformer_models: Iterable[ModelMetadata
     return all_transformer_models
 
 
-def display_model_perf_on_ind_data_points(models: List[ModelMetadata], dataset_name: str, indices, lf_name, lf_value):
+def collect_models(models, dataset_name: str, indices):
     n_exp = 0
     for i, model_metadata in enumerate(models):
         model_name = model_metadata['name']
         try:
             raw_df = read_labeled_dataset(model_metadata, dataset_name, indices if indices is not None else None)
-        except DatasetNotFound:
+        except DatasetNotFound as ex:
             st.warning(f'Dataset was not found: {ex}, skipping model: {model_metadata["name"]}')
             continue
         n_exp += 1
         if raw_df.empty:
-            st.info('No datapoints found.')
-            return
+            raise NoDatapointsFound()
         if i == 0:
             if 'label' in raw_df.columns:
                 prep_df: pd.DataFrame = raw_df[['sha', 'message', 'label']]
@@ -186,35 +186,46 @@ def display_model_perf_on_ind_data_points(models: List[ModelMetadata], dataset_n
             if 'label' in raw_df.columns:
                 prep_df.loc[:, model_name] = 1 - (raw_df["prob_CommitLabel.BugFix"] - raw_df["label"]).abs()
             else:
-                raise ValueError('Cannot calc accuracy for dataset without ground truth labels')
+                raise TrueLabelNotFound('Cannot calc accuracy for dataset without ground truth labels')
         elif st.session_state['ind_perf_metrics'] == 'probability':
             prep_df.loc[:, model_name] = raw_df["prob_CommitLabel.BugFix"]
         else:
             raise ValueError(f'Unknown value {st.session_state.ind_perf_metrics}')
+    return prep_df, n_exp
 
-    model_names = list(map(lambda m: m['name'], models))
-    chosen_metric = st.session_state['ind_perf_metrics']
-    if chosen_metric == 'accuracy':
-        prep_df.loc[:, 'how_often_precise'] = prep_df[model_names].apply(lambda row: (row > 0.5).sum() / float(n_exp), axis=1)
-        sort_columns=['how_often_precise', 'variance']
-    elif chosen_metric == 'probability':
-        precision = 1 - (prep_df[model_names].sub(prep_df["true label"], axis=0)).abs()
-        prep_df.loc[:, 'how_often_precise'] = precision.apply(lambda row: (row > 0.5).sum() / float(n_exp), axis=1)
-        sort_columns=['variance']
-    else:
-        raise ValueError(f'Unknown metric: {st.session_state["ind_perf_metrics"]}')
-    prep_df.loc[:, 'variance'] = prep_df[model_names].apply(lambda row: np.var(row), axis=1)
 
-    prep_df.sort_values(sort_columns, inplace=True, ascending=True)
 
-    df_styler = prep_df.style.format({key: "{:.2%}" for key in list(model_names) + ['variance', 'how_often_precise']})
-    df_styler = df_styler.background_gradient(cmap=cm)
+def display_model_perf_on_ind_data_points(models: List[ModelMetadata], dataset_name: str, indices, lf_name, lf_value):
+    try:
+        prep_df, n_exp = collect_models(models, dataset_name, indices)
+        model_names = list(map(lambda m: m['name'], models))
+        chosen_metric = st.session_state['ind_perf_metrics']
+        if chosen_metric == 'accuracy':
+            prep_df.loc[:, 'how_often_precise'] = prep_df[model_names].apply(lambda row: (row > 0.5).sum() / float(n_exp), axis=1)
+            sort_columns=['how_often_precise', 'variance']
+        elif chosen_metric == 'probability':
+            if 'true labels' in prep_df:
+                precision = 1 - (prep_df[model_names].sub(prep_df["true label"], axis=0)).abs()
+                prep_df.loc[:, 'how_often_precise'] = precision.apply(lambda row: (row > 0.5).sum() / float(n_exp), axis=1)
+            sort_columns=['variance']
+        else:
+            raise ValueError(f'Unknown metric: {st.session_state["ind_perf_metrics"]}')
+        prep_df.loc[:, 'variance'] = prep_df[model_names].apply(lambda row: np.var(row), axis=1)
 
-    desc = format_subset_description(dataset_name, lf_name, lf_value, len(prep_df))
-    st.write(desc)
-    st.write(df_styler)
+        prep_df.sort_values(sort_columns, inplace=True, ascending=True)
+
+        df_styler = prep_df.style.format({key: "{:.2%}" for key in list(model_names) + sort_columns})
+        df_styler = df_styler.background_gradient(cmap=cm)
+
+        desc = format_subset_description(dataset_name, lf_name, lf_value, len(prep_df))
+        st.write(desc)
+        st.write(df_styler)
+        st.download_button('Download', data=prep_df.to_csv(), file_name='preformance_data_points.csv')
+    except TrueLabelNotFound:
+        st.warning('Cannot compute accuracy for selected dataset: true labels not found')
+    except NoDatapointsFound:
+        st.warning('No datapoints')
     st.radio('', ['accuracy', 'probability'], key='ind_perf_metrics', format_func=format_indiv_radio)
-    st.download_button('Download', data=prep_df.to_csv(), file_name='preformance_data_points.csv')
 
 
 def format_subset_description(dataset_name: str, lf_name: str, lf_value: int, n_datapoints: int):
@@ -276,6 +287,7 @@ def create_metrics_dataframe(label_models: List[ModelMetadata], transformers: Li
     models = label_models + transformers
     matrix = []
     excluded_models = []
+    zero_datapoints_for_some_datasets = False
     for model_metadata in models:
         row = []
         st.spinner(f'Computing metrics for model `{model_metadata["name"]}`')
@@ -288,11 +300,14 @@ def create_metrics_dataframe(label_models: List[ModelMetadata], transformers: Li
                     res = compute_metric(df, st.session_state.metric, abstains_present)
                 else:
                     res = np.nan
+                    zero_datapoints_for_some_datasets = True
                 row.append(res)
             matrix.append(row)
         except DatasetNotFound as ex:
             st.warning(f'Dataset was not found: {ex}, skipping model: {model_metadata["name"]}')
             excluded_models.append(model_metadata)
+    if zero_datapoints_for_some_datasets:
+        st.warning('Zero matched data points for some datasets.')
 
     label_model_index_tuples = [(
         model['name'],
@@ -492,7 +507,7 @@ def main():
         lfs.index(st.session_state[f'model_perf.heuristic']) if f'model_perf.heuristic' in st.session_state else 0,
         st.session_state[f'model_perf.value'] if f'model_perf.value' in st.session_state else 0,
     )
-    selected_dataset, subset_criterion = choose_signle_dataset_ui(datasets_with_labels, lfs, 'model_perf_ind', default_indices)
+    selected_dataset, subset_criterion = choose_signle_dataset_ui(datasets_with_labels + datasets_without_labels, lfs, 'model_perf_ind', default_indices)
     indices = None
     lf_name = None
     lf_value = None
