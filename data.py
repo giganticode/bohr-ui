@@ -108,7 +108,7 @@ def read_labeled_dataset_from_transformers(model_name: str, selected_dataset):
     try:
         with st.spinner(f'Reading `{path}` from `{diff_classifier_repo}`'):
             with dvc.api.open(path, repo=diff_classifier_repo) as f:
-                df = pd.read_csv(f).rename(columns={'true_label': 'label'}, inplace=False)
+                df = pd.read_csv(f, nrows=6000).rename(columns={'true_label': 'label'}, inplace=False)
     except PathMissingError as ex:
         raise DatasetNotFound(diff_classifier_repo, path) from ex
     if 'label' in df.columns:
@@ -132,7 +132,7 @@ def read_labeled_dataset_from_bohr(model_name: str, selected_dataset_name: str):
         with st.spinner(f'Reading `{full_path}` from `{bohr_bugginess_repo}`'):
             print(f'Reading labeled dataset from bohr repo at: {full_path}')
             with open(full_path) as f:
-                df = pd.read_csv(f)
+                df = pd.read_csv(f, nrows=6000)
     except FileNotFoundError as ex:
         raise DatasetNotFound(diff_classifier_repo, path) from ex
     if 'label' in df.columns:
