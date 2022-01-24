@@ -1,5 +1,5 @@
 import random
-from typing import Dict, Optional, Tuple, List, Iterable
+from typing import Dict, Optional, Tuple, List, Iterable, Union
 
 import pandas as pd
 import streamlit as st
@@ -24,52 +24,85 @@ st.set_page_config(
 from config import datasets_with_labels, datasets_without_labels, get_mnemonic_for_dataset, label_models_metadata
 from data import read_labeled_dataset, get_dataset, compute_lf_coverages, compute_metric, get_fired_indexes, get_lfs, \
     bohr_repo, load_used_bohr_commit_sha, load_transformer_metadata, ModelMetadata, DatasetNotFound, TrueLabelNotFound, \
-    NoDatapointsFound
+    NoDatapointsFound, SubsetSelectionCriterion, LFResult, get_weights, get_fired_heuristics
 
 cm = sns.light_palette("green", as_cmap=True)
 
 
-def datapoints_subset_ui(lfs, prefix, default_indices: Optional[Tuple[int, int]] = None) -> Optional[Tuple[str, int]]:
-    col1, col2, col3 = st.columns(3)
+FIXED_LF_VALUES = {
+    'large_change': 0,
+    'small_change': 1
+}
+
+
+def get_possible_lf_values(lf_name: str) -> List[int]:
+    if lf_name in FIXED_LF_VALUES:
+        return [FIXED_LF_VALUES[lf_name]]
+
+    return [0, 1]
+
+
+def show_lf_selection(col2, col3, col4, prefix, default_indices, lfs) -> Tuple[str, int]:
+    lf = col2.selectbox('to which LF:', lfs, key=f'{prefix}.heuristic', index=default_indices[0] if default_indices else 0)
+    possible_values = get_possible_lf_values(lf)
+    if len(possible_values) > 1:
+        value = col3.selectbox('assigned value:', possible_values, key=f'{prefix}.value', index=default_indices[1] if default_indices else 0)
+    else:
+        value = possible_values[0]
+    commit = load_used_bohr_commit_sha()
+    path_to_revision = get_path_to_revision(bohr_repo, 'bohr-0.5', True, commit)
+    _, path = load_heuristic_by_name(lf, Commit, AbsolutePath(path_to_revision) / 'heuristics', return_path=True)
+    github_link = f'https://github.com/giganticode/bohr/tree/{commit}/' + str(path)
+    col4.write('')
+    col4.write('')
+    col4.write(f'`View labeling function on `[GitHub]({github_link})')
+    return lf, value
+
+
+def datapoints_subset_ui(lfs, prefix, default_indices: Optional[Tuple[int, int]] = None) -> SubsetSelectionCriterion:
+    col1, col2, col3, col4 = st.columns(4)
     col1.checkbox('Subset of data points', value=False, key=f'{prefix}.dataset_subset',
                   help='Limit to those data points on which a specific LF was fired.\n\n'
                        'The list also contains slicing function that are technically LFs but serve '
                        'the purpose of selecting important subsets of data rather assigning labels to them,'
                        ' e.g. `small change`, `large change`')
-    if st.session_state[f'{prefix}.dataset_subset']:
-        lf = col2.selectbox('to which LF:', lfs, key=f'{prefix}.heuristic', index=default_indices[0] if default_indices else 0)
-        value = col3.selectbox('assigned value:', [0, 1], key=f'{prefix}.value', index=default_indices[1] if default_indices else 0)
-        commit = load_used_bohr_commit_sha()
-        path_to_revision = get_path_to_revision(bohr_repo, 'bohr-0.5', True, commit)
-        _, path = load_heuristic_by_name(lf, Commit, AbsolutePath(path_to_revision) / 'heuristics', return_path=True)
-        github_link = f'https://github.com/giganticode/bohr/tree/{commit}/' + str(path)
-        col2.write(f'View labeling function on [GitHub]({github_link})')
-        return lf, value
-    return None
+    subset_selection_criterion = SubsetSelectionCriterion()
+    show_next_lf_ui = st.session_state[f'{prefix}.dataset_subset']
+    counter = 0
+    while show_next_lf_ui:
+        lf, value = show_lf_selection(col2, col3, col4, f'{prefix}.{counter}', default_indices, lfs)
+        subset_selection_criterion.lf_results.append(LFResult(lf, value))
+        _, col2, col3, col4 = st.columns(4)
+        col2.checkbox('+ Add LF to filter', value=False, key=f"{prefix}.rrr.{counter}")
+        show_next_lf_ui = st.session_state[f"{prefix}.rrr.{counter}"]
+        counter += 1
+        _, col2, col3, col4 = st.columns(4)
+
+    return subset_selection_criterion
 
 
-def choose_signle_dataset_ui(datasets, lfs, prefix, default_indices = None) -> Tuple[str, Optional[Tuple[str, int]]]:
+def choose_single_dataset_ui(datasets, lfs, prefix, default_indices = None) -> Tuple[str, SubsetSelectionCriterion]:
     chosen_dataset = st.selectbox('Select dataset to be analyzed:', datasets, key=f'{prefix}.msl', index=default_indices[0] if default_indices else 0, format_func=get_mnemonic_for_dataset)
-    res = None
+    subset_selection_criterion = None
     if chosen_dataset is not None:
-        res = datapoints_subset_ui(lfs, prefix, (default_indices[1], default_indices[2]))
-    return chosen_dataset, res
+        subset_selection_criterion = datapoints_subset_ui(lfs, prefix, (default_indices[1], default_indices[2]))
+    return chosen_dataset, subset_selection_criterion
 
 
-def choose_datasets_ui(datasets, lfs, prefix) -> Tuple[List[str], Optional[Tuple[str, int]]]:
+def choose_datasets_ui(datasets, lfs, prefix) -> Tuple[List[str], SubsetSelectionCriterion]:
     chosen_datasets = st.multiselect('Select dataset(s) to be analyzed:', options=datasets, default=datasets[:1], key=f'{prefix}.msl', format_func=get_mnemonic_for_dataset)
-    res = None
+    subset_selection_criterion = None
     if len(chosen_datasets) > 0:
-        res = datapoints_subset_ui(lfs, prefix)
-    return chosen_datasets, res
+        subset_selection_criterion = datapoints_subset_ui(lfs, prefix)
+    return chosen_datasets, subset_selection_criterion
 
 
 def display_coverage(lfs) -> None:
     try:
-        chosen_datasets, subset_criterion = choose_datasets_ui(datasets_with_labels + datasets_without_labels, lfs, 'lf_coverage')
+        chosen_datasets, subset_selection_criterion = choose_datasets_ui(datasets_with_labels + datasets_without_labels, lfs, 'lf_coverage')
         indices = None
-        if subset_criterion is not None:
-            indices = {dataset: get_fired_indexes(dataset, subset_criterion[0], subset_criterion[1]) for dataset in chosen_datasets}
+        if subset_selection_criterion:
+            indices = {dataset: get_fired_indexes(dataset, subset_selection_criterion) for dataset in chosen_datasets}
         if len(chosen_datasets) > 0:
             st_placeholder = st.empty()
             options = ['transformer', 'keyword', 'file metric']
@@ -90,8 +123,12 @@ def display_coverage(lfs) -> None:
                 st_placeholder.write(df_styler)
                 st.write('`Labeling functions that have zero coverage over all the datasets are omited`')
             else:
-                st_placeholder.info(f'There are no fired data points in any of the datasets. '
-                                    f'Are you sure that LF `{subset_criterion[0]}` can assign value `{subset_criterion[1]}`?')
+                if len(subset_selection_criterion.lf_results) == 1:
+                    lf_result = subset_selection_criterion.lf_results[0]
+                    st_placeholder.info(f'There are no fired data points in any of the datasets. '
+                                        f'Are you sure that LF `{lf_result.lf}` can assign value `{lf_result.value}`?')
+                else:
+                    st_placeholder.info(f'There are no fired data points in any of the datasets. Try simplifying the query.')
             st.download_button('Download', filtered_coverages_df.to_csv(), file_name='lf_values.csv')
     except PathMissingError as ex:
         st.warning("Selected dataset is not found. Was it uploaded to dvc remote?")
@@ -162,7 +199,7 @@ def display_transformer_filter_ui(all_transformer_models: Iterable[ModelMetadata
     return all_transformer_models
 
 
-def collect_models(models, dataset_name: str, indices):
+def collect_models(models: List[ModelMetadata], dataset_name: str, indices: List[int]):
     n_exp = 0
     for i, model_metadata in enumerate(models):
         model_name = model_metadata['name']
@@ -181,7 +218,7 @@ def collect_models(models, dataset_name: str, indices):
             else:
                 prep_df: pd.DataFrame = raw_df[['sha', 'message']]
         if 'ind_perf_metrics' not in st.session_state:
-            st.session_state['ind_perf_metrics'] = 'accuracy'
+            st.session_state['ind_perf_metrics'] = 'probability'
         if st.session_state['ind_perf_metrics'] == 'accuracy':
             if 'label' in raw_df.columns:
                 prep_df.loc[:, model_name] = 1 - (raw_df["prob_CommitLabel.BugFix"] - raw_df["label"]).abs()
@@ -195,7 +232,8 @@ def collect_models(models, dataset_name: str, indices):
 
 
 
-def display_model_perf_on_ind_data_points(models: List[ModelMetadata], dataset_name: str, indices, lf_name, lf_value):
+def display_model_perf_on_ind_data_points(models: List[ModelMetadata], dataset_name: str,
+                                          indices: List[int], subset_selection_criterion: SubsetSelectionCriterion):
     try:
         prep_df, n_exp = collect_models(models, dataset_name, indices)
         model_names = list(map(lambda m: m['name'], models))
@@ -217,7 +255,7 @@ def display_model_perf_on_ind_data_points(models: List[ModelMetadata], dataset_n
         df_styler = prep_df.style.format({key: "{:.2%}" for key in list(model_names) + sort_columns})
         df_styler = df_styler.background_gradient(cmap=cm)
 
-        desc = format_subset_description(dataset_name, lf_name, lf_value, len(prep_df))
+        desc = format_subset_description(dataset_name, subset_selection_criterion, len(prep_df))
         st.write(desc)
         st.write(df_styler)
         st.download_button('Download', data=prep_df.to_csv(), file_name='preformance_data_points.csv')
@@ -228,10 +266,9 @@ def display_model_perf_on_ind_data_points(models: List[ModelMetadata], dataset_n
     st.radio('', ['accuracy', 'probability'], key='ind_perf_metrics', format_func=format_indiv_radio)
 
 
-def format_subset_description(dataset_name: str, lf_name: str, lf_value: int, n_datapoints: int):
+def format_subset_description(dataset_name: str, subset_selection_criterion: SubsetSelectionCriterion, n_datapoints: int):
     desc = f'`Displaying data points from dataset {dataset_name}'
-    if lf_name is not None:
-        desc += f' [{lf_name} == {lf_value}]'
+    desc += str(subset_selection_criterion)
     desc += f', n datapoints: {n_datapoints}`'
     return desc
 
@@ -267,15 +304,14 @@ def format_normalization_labels(s):
     return map[s]
 
 
-def display_confusion_matrix(label_models: List[ModelMetadata], transformers: List[ModelMetadata], selected_datasets, indices, lf_name, lf_value):
+def display_confusion_matrix(label_models: List[ModelMetadata], transformers: List[ModelMetadata], selected_datasets, indices, subset_selection_criterion: SubsetSelectionCriterion):
     st.radio('Normalization', options=['None', 'true', 'pred', 'all'], key='normalize', format_func=format_normalization_labels)
     normalize = st.session_state['normalize']
     if normalize == 'None':
         normalize = None
     for dataset in selected_datasets:
         dataset_description = f'{get_mnemonic_for_dataset(dataset)}'
-        if lf_name is not None:
-            dataset_description += f'[{lf_name} == {lf_value}]'
+        dataset_description += str(subset_selection_criterion)
         st.write(f"#### {dataset_description}")
         layout = get_layout_for_confusion(len(label_models) + len(transformers))
         cols = [c for row in layout for c in st.columns(row)]
@@ -336,7 +372,7 @@ def create_metrics_dataframe(label_models: List[ModelMetadata], transformers: Li
     return metrics_dataframe
 
 
-def display_model_metrics(label_models: List[ModelMetadata], transformers: List[ModelMetadata], selected_datasets: List[str], indices, lf_name: str, lf_value: int) -> List[ModelMetadata]:
+def display_model_metrics(label_models: List[ModelMetadata], transformers: List[ModelMetadata], selected_datasets: List[str], indices, subset_selection_criterion: SubsetSelectionCriterion) -> List[ModelMetadata]:
     if 'metric' not in st.session_state:
         st.session_state['metric'] = 'accuracy'
     if 'rel_imp' not in st.session_state:
@@ -363,14 +399,17 @@ def display_model_metrics(label_models: List[ModelMetadata], transformers: List[
         c2.radio('', ['compare to baseline', 'compare to previous model'], key='comp_mode')
     st.checkbox('Show confusion matrix(es)', value=False, key='conf_matrix_checkbox')
     if st.session_state['conf_matrix_checkbox']:
-        display_confusion_matrix(label_models, transformers, selected_datasets, indices, lf_name, lf_value)
+        display_confusion_matrix(label_models, transformers, selected_datasets, indices, subset_selection_criterion)
     return [model_metadata for model_metadata in label_models + transformers if model_metadata['name'] in list(metrics_dataframe.index)]
 
 
-def display_datapoint_search_ui(dataset):
+def display_datapoint_search_ui(dataset, dataset_name, filtered_models):
     st.text_input("Get full information about data point ...", key='rt', placeholder='Start typing a commit hash')
     if st.session_state.rt != '':
-        datapoint = get_datapoint_by_id_beginning(dataset, st.session_state.rt)
+        datapoint, seq = get_datapoint_by_id_beginning(dataset, st.session_state.rt, return_seq=True)
+        if st.checkbox('Show weights', value=False, key='all_sp_weights'):
+            subset_criterion_criterion = get_fired_heuristics(dataset_name, seq)
+            show_model_weights(filtered_models, subset_criterion_criterion)
         if datapoint:
             st.write(f'https://github.com/{datapoint["owner"]}/{datapoint["repo"]}/commit/{datapoint["_id"]}')
             st.write(datapoint)
@@ -378,11 +417,12 @@ def display_datapoint_search_ui(dataset):
             st.warning('Data point not found.')
 
 
-def get_datapoint_by_id_beginning(dataset, id) -> Optional[Dict]:
-    for datapoint in dataset:
+def get_datapoint_by_id_beginning(dataset, id: str, return_seq: bool = False) -> Union[Optional[Dict],
+                                                                                  Tuple[Optional[Dict], Optional[int]]]:
+    for i, datapoint in enumerate(dataset):
         if datapoint['_id'].startswith(id):
-            return datapoint
-    return None
+            return (datapoint, i) if return_seq else datapoint
+    return (None, None) if return_seq else None
 
 
 def get_layout_for_confusion(n):
@@ -475,6 +515,15 @@ def confusion(dataset_name: str, model_metadata: ModelMetadata, indices, normali
     handle.pyplot(disp.figure)
 
 
+def show_model_weights(filtered_models, subset_selection_criterion: SubsetSelectionCriterion):
+    # get fired heuristics for data point.
+    weights_list = get_weights(filtered_models, subset_selection_criterion)
+    columns = st.columns(len(weights_list))
+    for c, wl, model in zip(columns, weights_list, filtered_models):
+        c.write(f"#### {model['name']}")
+        c.write(wl)
+
+
 def main():
     random.seed(13)
     np.random.seed(42)
@@ -489,17 +538,16 @@ def main():
     filtered_label_models = display_label_model_filter_ui(label_models_metadata)
     filtered_transformers = display_transformer_filter_ui(list(transformer_metadata.values()))
     filtered_models = filtered_label_models + filtered_transformers
-    selected_datasets, subset_criterion = choose_datasets_ui(datasets_with_labels, lfs, 'model_perf')
+    selected_datasets, subset_criterion_criterion = choose_datasets_ui(datasets_with_labels, lfs, 'model_perf')
     indices = None
-    if subset_criterion is not None:
-        indices = {dataset: get_fired_indexes(dataset, subset_criterion[0], subset_criterion[1]) for dataset in selected_datasets}
+    if subset_criterion_criterion:
+        indices = {dataset: get_fired_indexes(dataset, subset_criterion_criterion) for dataset in selected_datasets}
     if len(filtered_models) == 0:
         st.warning('No model satisfying chosen conditions found.')
     elif len(selected_datasets) == 0:
         st.warning('No datasets selected.')
     else:
-        lf_name, lf_value = subset_criterion if subset_criterion is not None else (None, None)
-        filtered_models = display_model_metrics(filtered_label_models, filtered_transformers, selected_datasets, indices, lf_name, lf_value)
+        filtered_models = display_model_metrics(filtered_label_models, filtered_transformers, selected_datasets, indices, subset_criterion_criterion)
 
     st.write('## Debugging individual data points')
     default_indices = (
@@ -507,18 +555,17 @@ def main():
         lfs.index(st.session_state[f'model_perf.heuristic']) if f'model_perf.heuristic' in st.session_state else 0,
         st.session_state[f'model_perf.value'] if f'model_perf.value' in st.session_state else 0,
     )
-    selected_dataset, subset_criterion = choose_signle_dataset_ui(datasets_with_labels + datasets_without_labels, lfs, 'model_perf_ind', default_indices)
+    selected_dataset, subset_criterion_criterion = choose_single_dataset_ui(datasets_with_labels + datasets_without_labels, lfs, 'model_perf_ind', default_indices)
+    if st.checkbox('Show weights', value=False, key='all_sp_weights_ind'):
+        show_model_weights(filtered_models, subset_criterion_criterion)
     indices = None
-    lf_name = None
-    lf_value = None
-    if subset_criterion is not None:
-        lf_name, lf_value = subset_criterion
-        indices = get_fired_indexes(selected_dataset, lf_name, lf_value)
+    if subset_criterion_criterion:
+        indices = get_fired_indexes(selected_dataset, subset_criterion_criterion)
     if selected_dataset is not None and len(filtered_models) > 0:
-        display_model_perf_on_ind_data_points(filtered_models, selected_dataset, indices, lf_name, lf_value)
+        display_model_perf_on_ind_data_points(filtered_models, selected_dataset, indices, subset_criterion_criterion)
 
         dataset = get_dataset(selected_dataset)
-        display_datapoint_search_ui(dataset)
+        display_datapoint_search_ui(dataset, selected_dataset, filtered_models)
 
 
 main()

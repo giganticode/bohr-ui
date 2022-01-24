@@ -1,7 +1,8 @@
 import json
 import re
 import subprocess
-from typing import List, Dict, Optional, NewType, Any
+from dataclasses import dataclass, field
+from typing import List, Dict, Optional, NewType, Any, Tuple
 
 import jsonlines as jsonlines
 import streamlit as st
@@ -31,6 +32,25 @@ KEYWORD_REGEX = re.compile('bug.*_message_keyword_(.*)')
 ModelMetadata = NewType('ModelMetadata', Dict[str, Any])
 
 
+@dataclass
+class LFResult():
+    lf: str
+    value: int
+
+    def __str__(self):
+        return f"{self.lf} == {self.value}"
+
+
+@dataclass
+class SubsetSelectionCriterion():
+    lf_results: List[LFResult] = field(default_factory=list)
+
+    def __str__(self):
+        if len(self.lf_results) == 0:
+            return ''
+        return "[" + "; ".join(map(lambda s: str(s), self.lf_results)) + "]"
+
+
 @st.cache(show_spinner=False)
 def get_label_matrix_locally(tmp_path):
     with st.spinner(f'Loading label matrix from {tmp_path}'):
@@ -58,7 +78,7 @@ def get_label_matrix(dataset_name: str) -> pd.DataFrame:
 
 
 @st.cache(allow_output_mutation=True, show_spinner=False)
-def read_labeled_dataset(model_metadata: ModelMetadata, selected_dataset_name: str, indices):
+def read_labeled_dataset(model_metadata: ModelMetadata, selected_dataset_name: str, indices: Optional[List[int]]):
     model_name = model_metadata["name"]
     model_type = model_metadata['model']
     with st.spinner(f'Loading labels by model `{model_name}` for dataset `{selected_dataset_name}`'):
@@ -68,15 +88,34 @@ def read_labeled_dataset(model_metadata: ModelMetadata, selected_dataset_name: s
             df = read_labeled_dataset_from_transformers(model_name, selected_dataset_name)
         else:
             raise ValueError(f'Unknown model type: {model_type}')
-    return df.iloc[indices, :] if indices is not None else df
+    if indices is None:
+        return df
+    max_index = len(df)
+    indices = [i for i in indices if i < max_index]
+    return df.iloc[indices, :]
 
 
 @st.cache(show_spinner=False)
-def get_fired_indexes(dataset, heuristic, value):
+def get_fired_indexes(dataset, subset_selection_criterion: SubsetSelectionCriterion) -> List[int]:
     label_matrix = get_label_matrix(dataset)
-    h_values = label_matrix[heuristic]
-    h_values = h_values[h_values == value]
-    return h_values.index.values.tolist()
+    for lf_result in subset_selection_criterion.lf_results:
+        label_matrix = label_matrix[label_matrix[lf_result.lf] == lf_result.value]
+    return label_matrix.index.values.tolist()
+
+
+@st.cache(show_spinner=False)
+def get_fired_heuristics(dataset: str, datapoint: int) -> SubsetSelectionCriterion:
+    res = SubsetSelectionCriterion()
+    label_matrix = get_label_matrix(dataset)
+    row = label_matrix.iloc[datapoint]
+    pos = row[row == 1]
+    for h in pos.index:
+        res.lf_results.append(LFResult(h, 1))
+    neg = row[row == 0]
+    for h in neg.index:
+        res.lf_results.append(LFResult(h, 0))
+    return res
+
 
 
 @st.cache(show_spinner=False)
@@ -218,6 +257,19 @@ def compute_lf_coverages(dataset_ids, indexes: Optional[Dict[str, List[int]]] = 
     return all_datasets_coverage_df
 
 
+@st.cache(show_spinner=False)
+def get_label_model_weights(model_name: str) -> pd.DataFrame:
+    path = f'runs/bugginess/{model_name}/label_model_weights.csv'
+    path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', True)
+    subprocess.run(["dvc", "pull", path], cwd=path_to_revision)
+    full_path = f'{path_to_revision}/{path}'
+    with st.spinner(f'Reading `{full_path}` from `{bohr_bugginess_repo}`'):
+        print(f'Reading label model weights from bohr repo at: {full_path}')
+        with open(full_path) as f:
+            df = pd.read_csv(f, index_col=['heuristic_name'])
+    return df
+
+
 class TrueLabelNotFound(Exception):
     pass
 
@@ -315,3 +367,46 @@ def FN(predicted, actual):
     1
     """
     return sum(a == 1 and p == 0 for p, a in zip(predicted, actual))
+
+
+@st.cache(show_spinner=False)
+def get_weights(models: List[ModelMetadata], subset_selection_criterion: SubsetSelectionCriterion, normalized: bool = True) -> List[pd.DataFrame]:
+    lst = []
+    ln = len(subset_selection_criterion.lf_results)
+    for model in models:
+        matrix = [[] for _ in range(ln)]
+        try:
+            weights = get_label_model_weights(model['name'])
+
+            for i, lf_result in enumerate(subset_selection_criterion.lf_results):
+                if lf_result.lf in weights.index:
+                    row = weights.loc[lf_result.lf]
+                    if lf_result.value == 0:
+                        buggless_weight = row['00']
+                        buggy_weight = row['01']
+                    elif lf_result.value == 1:
+                        buggless_weight = row['10']
+                        buggy_weight = row['11']
+                    else:
+                        raise AssertionError()
+                    if normalized:
+                        normalizer = buggless_weight if buggless_weight < buggy_weight else buggy_weight
+                        buggless_weight /= normalizer
+                        buggy_weight /= normalizer
+                        if np.isclose(buggless_weight, 1.0):
+                            buggless_weight = int(buggy_weight)
+                        if np.isclose(buggy_weight, 1.0):
+                            buggy_weight = int(buggy_weight)
+                    matrix[i].append(buggless_weight)
+                    matrix[i].append(buggy_weight)
+                else:
+                    matrix[i].append(np.nan)
+                    matrix[i].append(np.nan)
+        except FileNotFoundError:
+            for i in range(ln):
+                matrix[i].append(np.nan)
+                matrix[i].append(np.nan)
+
+        df = pd.DataFrame(matrix, index=list(map(lambda l: l.lf, subset_selection_criterion.lf_results)), columns=['non-bug', 'bug'])
+        lst.append(df)
+    return lst

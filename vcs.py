@@ -6,7 +6,6 @@ from typing import Optional
 
 import appdirs
 from git import Repo
-import dvc.api
 
 
 logger = logging.getLogger()
