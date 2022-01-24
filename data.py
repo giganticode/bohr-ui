@@ -394,7 +394,7 @@ def get_weights(models: List[ModelMetadata], subset_selection_criterion: SubsetS
                         buggless_weight /= normalizer
                         buggy_weight /= normalizer
                         if np.isclose(buggless_weight, 1.0):
-                            buggless_weight = int(buggy_weight)
+                            buggless_weight = int(buggless_weight)
                         if np.isclose(buggy_weight, 1.0):
                             buggy_weight = int(buggy_weight)
                     matrix[i].append(buggless_weight)

@@ -67,6 +67,13 @@ label_models_metadata = [
         'train_dataset': 'commits_200k_files',
     },
     {
+        'name': 'only_message_and_label_keywords',
+        'label_source': 'keywords',
+        'issues': 'issue labels',
+        'model': 'label model',
+        'train_dataset': 'commits_200k_files',
+    },
+    {
         'name': 'only_message_keywords',
         'label_source': 'keywords',
         'issues': 'without issues',

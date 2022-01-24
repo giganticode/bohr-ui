@@ -90,7 +90,7 @@ def choose_single_dataset_ui(datasets, lfs, prefix, default_indices = None) -> T
 
 
 def choose_datasets_ui(datasets, lfs, prefix) -> Tuple[List[str], SubsetSelectionCriterion]:
-    chosen_datasets = st.multiselect('Select dataset(s) to be analyzed:', options=datasets, default=datasets[:1], key=f'{prefix}.msl', format_func=get_mnemonic_for_dataset)
+    chosen_datasets = st.multiselect('Select dataset(s) to be analyzed:', options=datasets, default=datasets[1:4], key=f'{prefix}.msl', format_func=get_mnemonic_for_dataset)
     subset_selection_criterion = None
     if len(chosen_datasets) > 0:
         subset_selection_criterion = datapoints_subset_ui(lfs, prefix)
@@ -149,7 +149,7 @@ def display_label_model_filter_ui(all_label_models: List[ModelMetadata]) -> List
         lfs_radio = st.session_state['labeling_functions']
         if lfs_radio != 'all':
             all_label_models = [model for model in all_label_models if (model['label_source'] == lfs_radio)]
-        col2.radio('Issues', ['with issues', 'without issues', 'all'], key="issues", index=2)
+        col2.radio('Issues', ['with issues', 'without issues', 'issue labels', 'all'], key="issues", index=2)
         issues_radio = st.session_state['issues']
         if issues_radio != 'all':
             all_label_models = [model for model in all_label_models if (model['issues'] == issues_radio)]
@@ -363,7 +363,7 @@ def create_metrics_dataframe(label_models: List[ModelMetadata], transformers: Li
         model['issues'],
         model['train_dataset'],
         model['trained_on'],
-        model['soft_labels'],
+        'yes' if model['soft_labels'] == 1 else 'no',
         model['augmentation'],
     ) for model in transformers if model not in excluded_models]
     ind = MultiIndex.from_tuples(label_model_index_tuples + transformer_index_tuples, names=['id', 'model', 'label source', 'issues', 'trained on', 'dataset type', 'soft labels', 'data aug'])
@@ -407,7 +407,8 @@ def display_datapoint_search_ui(dataset, dataset_name, filtered_models):
     st.text_input("Get full information about data point ...", key='rt', placeholder='Start typing a commit hash')
     if st.session_state.rt != '':
         datapoint, seq = get_datapoint_by_id_beginning(dataset, st.session_state.rt, return_seq=True)
-        if st.checkbox('Show weights', value=False, key='all_sp_weights'):
+        if st.checkbox('Show weights of all LFs fired on this data point (for LMs only)', value=False, key='all_sp_weights',
+                       help='N/A means that the heuristic was fired on this data point but is not used by current model'):
             subset_criterion_criterion = get_fired_heuristics(dataset_name, seq)
             show_model_weights(filtered_models, subset_criterion_criterion)
         if datapoint:
@@ -516,12 +517,19 @@ def confusion(dataset_name: str, model_metadata: ModelMetadata, indices, normali
 
 
 def show_model_weights(filtered_models, subset_selection_criterion: SubsetSelectionCriterion):
-    # get fired heuristics for data point.
-    weights_list = get_weights(filtered_models, subset_selection_criterion)
-    columns = st.columns(len(weights_list))
-    for c, wl, model in zip(columns, weights_list, filtered_models):
-        c.write(f"#### {model['name']}")
-        c.write(wl)
+    ln = len(filtered_models)
+    if ln <= 0:
+        st.warning('Please select at leats one model.')
+    elif ln > 3:
+        st.warning('Can display weight for at most 3 models.')
+    else:
+        weights_list = get_weights(filtered_models, subset_selection_criterion)
+        columns = st.columns(ln)
+        for c, wl, model in zip(columns, weights_list, filtered_models):
+            title = f'#### {model["name"]}\n\n{model["label_source"]} - {model["issues"]}'
+            c.write(title)
+            c.write(wl)
+
 
 
 def main():
@@ -556,7 +564,7 @@ def main():
         st.session_state[f'model_perf.value'] if f'model_perf.value' in st.session_state else 0,
     )
     selected_dataset, subset_criterion_criterion = choose_single_dataset_ui(datasets_with_labels + datasets_without_labels, lfs, 'model_perf_ind', default_indices)
-    if st.checkbox('Show weights', value=False, key='all_sp_weights_ind'):
+    if st.checkbox('Show weights assigned to selected LFs (for LMs only)', value=False, key='all_sp_weights_ind'):
         show_model_weights(filtered_models, subset_criterion_criterion)
     indices = None
     if subset_criterion_criterion:
