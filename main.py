@@ -1,5 +1,5 @@
 import random
-from typing import Dict, Optional, Tuple, List, Iterable, Union
+from typing import Optional, Tuple, List, Dict, Union, Iterable
 
 import pandas as pd
 import streamlit as st
@@ -23,32 +23,36 @@ st.set_page_config(
 
 from config import datasets_with_labels, datasets_without_labels, get_mnemonic_for_dataset, label_models_metadata
 from data import read_labeled_dataset, get_dataset, compute_lf_coverages, compute_metric, get_fired_indexes, get_lfs, \
-    bohr_repo, load_used_bohr_commit_sha, load_transformer_metadata, ModelMetadata, DatasetNotFound, TrueLabelNotFound, \
-    NoDatapointsFound, SubsetSelectionCriterion, LFResult, get_weights, get_fired_heuristics
+    bohr_repo, load_used_bohr_commit_sha, load_transformer_metadata, DatasetNotFound, TrueLabelNotFound, \
+    NoDatapointsFound, SubsetSelectionCriterion, LFResult, get_weights, get_fired_heuristics, get_label_matrix, \
+    get_all_dataset_fired_values, ModelMetadata
 
 cm = sns.light_palette("green", as_cmap=True)
 
 
-FIXED_LF_VALUES = {
-    'large_change': 0,
-    'small_change': 1
-}
+def get_possible_lf_values(lf_name: str, dataset_names: str) -> List[int]:
+    all_possible_values = set()
+    for dataset_name in dataset_names:
+        try:
+            label_matrix = get_label_matrix(dataset_name)
+            all_possible_values.update(label_matrix[lf_name].tolist())
+        except FileNotFoundError:
+            pass
+    all_possible_values.remove(-1)
+    return list(all_possible_values)
 
 
-def get_possible_lf_values(lf_name: str) -> List[int]:
-    if lf_name in FIXED_LF_VALUES:
-        return [FIXED_LF_VALUES[lf_name]]
-
-    return [0, 1]
-
-
-def show_lf_selection(col2, col3, col4, prefix, default_indices, lfs) -> Tuple[str, int]:
-    lf = col2.selectbox('to which LF:', lfs, key=f'{prefix}.heuristic', index=default_indices[0] if default_indices else 0)
-    possible_values = get_possible_lf_values(lf)
+def show_lf_selection(col2, col3, col4, prefix, default_indices, dataset_names) -> Tuple[str, Optional[int]]:
+    all_dataset_fired_values = get_all_dataset_fired_values(dataset_names)
+    fired_lfs = [name for name, s in all_dataset_fired_values.items() if len(s) > 0]
+    lf = col2.selectbox('to which LF:', fired_lfs, key=f'{prefix}.heuristic', index=default_indices[0] if default_indices else 0)
+    possible_values = all_dataset_fired_values[lf]
     if len(possible_values) > 1:
         value = col3.selectbox('assigned value:', possible_values, key=f'{prefix}.value', index=default_indices[1] if default_indices else 0)
-    else:
+    elif len(possible_values) == 1:
         value = possible_values[0]
+    else:
+        raise ValueError('Selected LF does not fire on these datasets.')
     commit = load_used_bohr_commit_sha()
     path_to_revision = get_path_to_revision(bohr_repo, 'bohr-0.5', True, commit)
     _, path = load_heuristic_by_name(lf, Commit, AbsolutePath(path_to_revision) / 'heuristics', return_path=True)
@@ -59,7 +63,7 @@ def show_lf_selection(col2, col3, col4, prefix, default_indices, lfs) -> Tuple[s
     return lf, value
 
 
-def datapoints_subset_ui(lfs, prefix, default_indices: Optional[Tuple[int, int]] = None) -> SubsetSelectionCriterion:
+def datapoints_subset_ui(dataset_names, prefix, default_indices: Optional[Tuple[int, int]] = None) -> SubsetSelectionCriterion:
     col1, col2, col3, col4 = st.columns(4)
     col1.checkbox('Subset of data points', value=False, key=f'{prefix}.dataset_subset',
                   help='Limit to those data points on which a specific LF was fired.\n\n'
@@ -70,7 +74,7 @@ def datapoints_subset_ui(lfs, prefix, default_indices: Optional[Tuple[int, int]]
     show_next_lf_ui = st.session_state[f'{prefix}.dataset_subset']
     counter = 0
     while show_next_lf_ui:
-        lf, value = show_lf_selection(col2, col3, col4, f'{prefix}.{counter}', default_indices, lfs)
+        lf, value = show_lf_selection(col2, col3, col4, f'{prefix}.{counter}', default_indices, dataset_names)
         subset_selection_criterion.lf_results.append(LFResult(lf, value))
         _, col2, col3, col4 = st.columns(4)
         col2.checkbox('+ Add LF to filter', value=False, key=f"{prefix}.rrr.{counter}")
@@ -81,25 +85,25 @@ def datapoints_subset_ui(lfs, prefix, default_indices: Optional[Tuple[int, int]]
     return subset_selection_criterion
 
 
-def choose_single_dataset_ui(datasets, lfs, prefix, default_indices = None) -> Tuple[str, SubsetSelectionCriterion]:
+def choose_single_dataset_ui(datasets, prefix, default_indices = None) -> Tuple[str, SubsetSelectionCriterion]:
     chosen_dataset = st.selectbox('Select dataset to be analyzed:', datasets, key=f'{prefix}.msl', index=default_indices[0] if default_indices else 0, format_func=get_mnemonic_for_dataset)
     subset_selection_criterion = None
     if chosen_dataset is not None:
-        subset_selection_criterion = datapoints_subset_ui(lfs, prefix, (default_indices[1], default_indices[2]))
+        subset_selection_criterion = datapoints_subset_ui(chosen_dataset, prefix, (default_indices[1], default_indices[2]))
     return chosen_dataset, subset_selection_criterion
 
 
-def choose_datasets_ui(datasets, lfs, prefix) -> Tuple[List[str], SubsetSelectionCriterion]:
+def choose_datasets_ui(datasets, prefix) -> Tuple[List[str], SubsetSelectionCriterion]:
     chosen_datasets = st.multiselect('Select dataset(s) to be analyzed:', options=datasets, default=datasets[1:4], key=f'{prefix}.msl', format_func=get_mnemonic_for_dataset)
     subset_selection_criterion = None
     if len(chosen_datasets) > 0:
-        subset_selection_criterion = datapoints_subset_ui(lfs, prefix)
+        subset_selection_criterion = datapoints_subset_ui(chosen_datasets, prefix)
     return chosen_datasets, subset_selection_criterion
 
 
-def display_coverage(lfs) -> None:
+def display_coverage() -> None:
     try:
-        chosen_datasets, subset_selection_criterion = choose_datasets_ui(datasets_with_labels + datasets_without_labels, lfs, 'lf_coverage')
+        chosen_datasets, subset_selection_criterion = choose_datasets_ui(datasets_with_labels + datasets_without_labels, 'lf_coverage')
         indices = None
         if subset_selection_criterion:
             indices = {dataset: get_fired_indexes(dataset, subset_selection_criterion) for dataset in chosen_datasets}
@@ -531,14 +535,12 @@ def show_model_weights(filtered_models, subset_selection_criterion: SubsetSelect
             c.write(wl)
 
 
-
 def main():
     random.seed(13)
     np.random.seed(42)
-    lfs = get_lfs(datasets_with_labels[-1])
 
     st.write('## Assignment of labels by labeling functions (LFs)')
-    display_coverage(lfs)
+    display_coverage()
 
     st.write('## Performance of models')
 
@@ -546,7 +548,7 @@ def main():
     filtered_label_models = display_label_model_filter_ui(label_models_metadata)
     filtered_transformers = display_transformer_filter_ui(list(transformer_metadata.values()))
     filtered_models = filtered_label_models + filtered_transformers
-    selected_datasets, subset_criterion_criterion = choose_datasets_ui(datasets_with_labels, lfs, 'model_perf')
+    selected_datasets, subset_criterion_criterion = choose_datasets_ui(datasets_with_labels, 'model_perf')
     indices = None
     if subset_criterion_criterion:
         indices = {dataset: get_fired_indexes(dataset, subset_criterion_criterion) for dataset in selected_datasets}
@@ -560,10 +562,10 @@ def main():
     st.write('## Debugging individual data points')
     default_indices = (
         datasets_with_labels.index(st.session_state[f'model_perf.msl'][0]) if (f'model_perf.msl' in st.session_state and st.session_state[f'model_perf.msl']) else 0,
-        lfs.index(st.session_state[f'model_perf.heuristic']) if f'model_perf.heuristic' in st.session_state else 0,
+        0,
         st.session_state[f'model_perf.value'] if f'model_perf.value' in st.session_state else 0,
     )
-    selected_dataset, subset_criterion_criterion = choose_single_dataset_ui(datasets_with_labels + datasets_without_labels, lfs, 'model_perf_ind', default_indices)
+    selected_dataset, subset_criterion_criterion = choose_single_dataset_ui(datasets_with_labels + datasets_without_labels, 'model_perf_ind', default_indices)
     if st.checkbox('Show weights assigned to selected LFs (for LMs only)', value=False, key='all_sp_weights_ind'):
         show_model_weights(filtered_models, subset_criterion_criterion)
     indices = None

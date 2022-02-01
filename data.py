@@ -410,3 +410,18 @@ def get_weights(models: List[ModelMetadata], subset_selection_criterion: SubsetS
         df = pd.DataFrame(matrix, index=list(map(lambda l: l.lf, subset_selection_criterion.lf_results)), columns=['non-bug', 'bug'])
         lst.append(df)
     return lst
+
+
+@st.cache(show_spinner=False)
+def get_all_dataset_fired_values(dataset_names: List[str]) -> {str: List[int]}:
+    res: {str: List[int]} = {}
+    for dataset_name in dataset_names:
+        label_matrix = get_label_matrix(dataset_name)
+        for col_name in label_matrix:
+            if col_name not in res:
+                res[col_name] = set()
+            res[col_name].update(label_matrix[col_name].unique())
+    for v in res.values():
+        v.remove(-1)
+    res = {name: sorted(s) for name, s in res.items()}
+    return res
