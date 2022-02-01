@@ -535,15 +535,7 @@ def show_model_weights(filtered_models, subset_selection_criterion: SubsetSelect
             c.write(wl)
 
 
-def main():
-    random.seed(13)
-    np.random.seed(42)
-
-    st.write('## Assignment of labels by labeling functions (LFs)')
-    display_coverage()
-
-    st.write('## Performance of models')
-
+def display_bugginess_performance():
     transformer_metadata = load_transformer_metadata()
     filtered_label_models = display_label_model_filter_ui(label_models_metadata)
     filtered_transformers = display_transformer_filter_ui(list(transformer_metadata.values()))
@@ -558,8 +550,10 @@ def main():
         st.warning('No datasets selected.')
     else:
         filtered_models = display_model_metrics(filtered_label_models, filtered_transformers, selected_datasets, indices, subset_criterion_criterion)
+    return filtered_models
 
-    st.write('## Debugging individual data points')
+
+def display_individual_data_point_debugging(filtered_models):
     default_indices = (
         datasets_with_labels.index(st.session_state[f'model_perf.msl'][0]) if (f'model_perf.msl' in st.session_state and st.session_state[f'model_perf.msl']) else 0,
         0,
@@ -576,6 +570,20 @@ def main():
 
         dataset = get_dataset(selected_dataset)
         display_datapoint_search_ui(dataset, selected_dataset, filtered_models)
+
+
+def main():
+    random.seed(13)
+    np.random.seed(42)
+
+    st.write('## Assignment of labels by labeling functions (LFs)')
+    display_coverage()
+
+    st.write('## Performance of models (bugginess)')
+    filtered_models = display_bugginess_performance()
+
+    st.write('## Debugging individual data points')
+    display_individual_data_point_debugging(filtered_models)
 
 
 main()
