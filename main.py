@@ -94,7 +94,8 @@ def choose_single_dataset_ui(datasets, prefix, default_indices = None) -> Tuple[
 
 
 def choose_datasets_ui(datasets, prefix) -> Tuple[List[str], SubsetSelectionCriterion]:
-    chosen_datasets = st.multiselect('Select dataset(s) to be analyzed:', options=datasets, default=datasets[1:4], key=f'{prefix}.msl', format_func=get_mnemonic_for_dataset)
+    chosen_datasets = st.multiselect('Select dataset(s) to be analyzed:', options=datasets,
+                                     default=[datasets[5], datasets[0], datasets[6]], key=f'{prefix}.msl', format_func=get_mnemonic_for_dataset)
     subset_selection_criterion = None
     if len(chosen_datasets) > 0:
         subset_selection_criterion = datapoints_subset_ui(chosen_datasets, prefix)
@@ -103,7 +104,7 @@ def choose_datasets_ui(datasets, prefix) -> Tuple[List[str], SubsetSelectionCrit
 
 def display_coverage() -> None:
     try:
-        chosen_datasets, subset_selection_criterion = choose_datasets_ui(datasets_with_labels + datasets_without_labels, 'lf_coverage')
+        chosen_datasets, subset_selection_criterion = choose_datasets_ui(sorted(datasets_with_labels.keys()) + datasets_without_labels, 'lf_coverage')
         indices = None
         if subset_selection_criterion:
             indices = {dataset: get_fired_indexes(dataset, subset_selection_criterion) for dataset in chosen_datasets}
@@ -144,7 +145,7 @@ def display_label_model_filter_ui(all_label_models: List[ModelMetadata]) -> List
     st.checkbox('Include label models', value=False, key='include_label_models')
     if st.session_state['include_label_models']:
         col1, col2, col3, col4, col5 = st.columns(5)
-        col1.radio('Labeling functions', ['keywords', 'all heuristics', 'gitcproc', 'gitcproc_orig', 'all'],
+        col1.radio('Labeling functions', ['zeros', 'random', 'keywords', 'all heuristics', 'gitcproc', 'gitcproc_orig', 'all'],
                    key="labeling_functions", index=4,
                    help='keywords: only keyword heuristics\n\n'
                         'all heuristics: keywords + file metrics + transformer trained on conventional commits\n\n'
@@ -225,11 +226,11 @@ def collect_models(models: List[ModelMetadata], dataset_name: str, indices: List
             st.session_state['ind_perf_metrics'] = 'probability'
         if st.session_state['ind_perf_metrics'] == 'accuracy':
             if 'label' in raw_df.columns:
-                prep_df.loc[:, model_name] = 1 - (raw_df["prob_CommitLabel.BugFix"] - raw_df["label"]).abs()
+                prep_df.loc[:, model_name] = 1 - (raw_df["prob_BugFix"] - raw_df["label"]).abs()
             else:
                 raise TrueLabelNotFound('Cannot calc accuracy for dataset without ground truth labels')
         elif st.session_state['ind_perf_metrics'] == 'probability':
-            prep_df.loc[:, model_name] = raw_df["prob_CommitLabel.BugFix"]
+            prep_df.loc[:, model_name] = raw_df["prob_BugFix"]
         else:
             raise ValueError(f'Unknown value {st.session_state.ind_perf_metrics}')
     return prep_df, n_exp
@@ -540,7 +541,7 @@ def display_bugginess_performance():
     filtered_label_models = display_label_model_filter_ui(label_models_metadata)
     filtered_transformers = display_transformer_filter_ui(list(transformer_metadata.values()))
     filtered_models = filtered_label_models + filtered_transformers
-    selected_datasets, subset_criterion_criterion = choose_datasets_ui(datasets_with_labels, 'model_perf')
+    selected_datasets, subset_criterion_criterion = choose_datasets_ui(sorted(datasets_with_labels.keys()), 'model_perf')
     indices = None
     if subset_criterion_criterion:
         indices = {dataset: get_fired_indexes(dataset, subset_criterion_criterion) for dataset in selected_datasets}
@@ -555,11 +556,11 @@ def display_bugginess_performance():
 
 def display_individual_data_point_debugging(filtered_models):
     default_indices = (
-        datasets_with_labels.index(st.session_state[f'model_perf.msl'][0]) if (f'model_perf.msl' in st.session_state and st.session_state[f'model_perf.msl']) else 0,
+        sorted(datasets_with_labels.keys()).index(st.session_state[f'model_perf.msl'][0]) if (f'model_perf.msl' in st.session_state and st.session_state[f'model_perf.msl']) else 0,
         0,
         st.session_state[f'model_perf.value'] if f'model_perf.value' in st.session_state else 0,
     )
-    selected_dataset, subset_criterion_criterion = choose_single_dataset_ui(datasets_with_labels + datasets_without_labels, 'model_perf_ind', default_indices)
+    selected_dataset, subset_criterion_criterion = choose_single_dataset_ui(sorted(datasets_with_labels.keys()) + datasets_without_labels, 'model_perf_ind', default_indices)
     if st.checkbox('Show weights assigned to selected LFs (for LMs only)', value=False, key='all_sp_weights_ind'):
         show_model_weights(filtered_models, subset_criterion_criterion)
     indices = None

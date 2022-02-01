@@ -1,3 +1,5 @@
+from bohrlabels.labels import CommitLabel
+
 map = {
     'levin_files': 'levin (files)',
     'berger_files': 'berger (files)',
@@ -14,23 +16,36 @@ def get_mnemonic_for_dataset(dataset_name):
     return map[dataset_name]
 
 
-datasets_with_labels = [
-    'commits_200k_files',
-    'levin_files',
-    'berger_files',
-    'manual_labels.herzig',
-    'mauczka_files',
-    'bohr.herzig_train',
-    'bohr.herzig_eval',
-    'idan_files',
-]
+# pull these data from bugginess-workdir
+datasets_with_labels = {
+    'commits_200k_files': None,
+    'bohr.herzig_train': lambda c: (CommitLabel.BugFix if c.raw_data['manual_labels']['herzig']['CLASSIFIED'] == 'BUG' else CommitLabel.NonBugFix),
+    'bohr.herzig_eval': lambda c: (CommitLabel.BugFix if c.raw_data['manual_labels']['herzig']['CLASSIFIED'] == 'BUG' else CommitLabel.NonBugFix),
+    'idan_files': lambda c: (CommitLabel.BugFix if c.raw_data['idan/0_1']['Is_Corrective'] else CommitLabel.NonBugFix),
+    'levin_files': lambda c: (CommitLabel.BugFix if c.raw_data['manual_labels']['levin']['bug'] == 1 else CommitLabel.NonBugFix),
+    'berger_files': lambda c: (CommitLabel.BugFix if c.raw_data['manual_labels']['berger']['bug'] == 1 else CommitLabel.NonBugFix),
+    'manual_labels.herzig': lambda c: (CommitLabel.BugFix if c.raw_data['manual_labels']['herzig']['CLASSIFIED'] == 'BUG' else CommitLabel.NonBugFix),
+    'mauczka_files': lambda c: (CommitLabel.BugFix if c.raw_data['manual_labels']['mauczka']['hl_corrective'] == 1 else CommitLabel.NonBugFix),
+}
 
-datasets_without_labels = [d for d in map if d not in datasets_with_labels]
-
-
+datasets_without_labels = [d for d in map if d not in datasets_with_labels.keys()]
 
 
 label_models_metadata = [
+    {
+        'name': 'zero_model',
+        'label_source': 'zeros',
+        'issues': 'without issues',
+        'model': 'label model',
+        'train_dataset': 'commits_200k_files',
+    },
+    {
+        'name': 'random_model',
+        'label_source': 'random',
+        'issues': 'without issues',
+        'model': 'label model',
+        'train_dataset': 'commits_200k_files',
+    },
     {
         'name': 'gitcproc',
         'label_source': 'gitcproc',

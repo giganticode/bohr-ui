@@ -2,7 +2,7 @@ import json
 import re
 import subprocess
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, NewType, Any, Tuple
+from typing import List, Dict, Optional, NewType, Any, Tuple, Callable
 
 import jsonlines as jsonlines
 import streamlit as st
@@ -10,13 +10,18 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import dvc.api
+from bohrapi.artifacts import Commit
+from bohrapi.core import ArtifactType
+from bohrlabels.labels import CommitLabel
 from bohrruntime.core import load_workspace
+from bohrruntime.stages.label_dataset import create_df_from_dataset
 from dvc.exceptions import PathMissingError
+from pandas import Series
 from sklearn.metrics import f1_score
 
 from tqdm import tqdm
 
-from config import get_mnemonic_for_dataset
+from config import get_mnemonic_for_dataset, datasets_with_labels
 from vcs import get_path_to_revision
 
 bohr_bugginess_repo = 'https://github.com/giganticode/bohr-workdir-bugginess'
@@ -77,12 +82,28 @@ def get_label_matrix(dataset_name: str) -> pd.DataFrame:
     return get_label_matrix_locally(f'{path_to_revision}/{path}')
 
 
+def zero_generator():
+    while True:
+        yield 0.
+
+
+def alternating_zero_one_generator():
+    yield_one = True
+    while True:
+        yield 1. if yield_one else 0.
+        yield_one = not yield_one
+
+
 @st.cache(allow_output_mutation=True, show_spinner=False)
 def read_labeled_dataset(model_metadata: ModelMetadata, selected_dataset_name: str, indices: Optional[List[int]]):
     model_name = model_metadata["name"]
     model_type = model_metadata['model']
     with st.spinner(f'Loading labels by model `{model_name}` for dataset `{selected_dataset_name}`'):
-        if model_type == 'label model':
+        if model_name == 'zero_model':
+            df = create_syntetic_labeled_df(selected_dataset_name, zero_generator, CommitLabel.BugFix, Commit)
+        elif model_name == 'random_model':
+            df = create_syntetic_labeled_df(selected_dataset_name, alternating_zero_one_generator, CommitLabel.BugFix, Commit)
+        elif model_type == 'label model':
             df = read_labeled_dataset_from_bohr(model_name, selected_dataset_name)
         elif model_type == 'transformer':
             df = read_labeled_dataset_from_transformers(model_name, selected_dataset_name)
@@ -158,6 +179,15 @@ def read_labeled_dataset_from_transformers(model_name: str, selected_dataset):
     df.loc[:, 'prob_CommitLabel.BugFix'] = df.apply(
         lambda row: (row['probability'] if row['prediction'] == 'BugFix' else (1 - row['probability'])), axis=1)
     return df
+
+
+def create_syntetic_labeled_df(dataset_name: str, label_generator: Callable, label: CommitLabel, artifact_type: ArtifactType) -> pd.DataFrame:
+    artifacts = list(map(lambda a: artifact_type(a), get_dataset(dataset_name)))
+    df = create_df_from_dataset(artifacts, datasets_with_labels[dataset_name])
+    label_generator = label_generator()
+    df_labeled = df.assign(predicted=Series([next(label_generator) for _ in range(len(df))]))
+    df_labeled[f"prob_{'|'.join(label.to_numeric_label().to_commit_labels_set())}"] = Series([1. for _ in range(len(df))])
+    return df_labeled
 
 
 @st.cache(show_spinner=False)
@@ -281,9 +311,9 @@ class NoDatapointsFound(Exception):
 @st.cache(show_spinner=False)
 def compute_metric(df, metric, randomize_abstains) -> float:
     if randomize_abstains and metric != 'certainty':
-        predicted_continuous = df.apply(lambda row: (np.random.random() if np.isclose(row['prob_CommitLabel.BugFix'], 0.5) else row['prob_CommitLabel.BugFix']), axis=1)
+        predicted_continuous = df.apply(lambda row: (np.random.random() if np.isclose(row['prob_BugFix'], 0.5) else row['prob_BugFix']), axis=1)
     else:
-        predicted_continuous = df['prob_CommitLabel.BugFix']
+        predicted_continuous = df['prob_BugFix']
     predicted = (predicted_continuous > 0.5).astype(int)
     if 'label' not in df.columns:
         raise TrueLabelNotFound()
