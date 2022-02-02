@@ -17,7 +17,7 @@ from sklearn.metrics import confusion_matrix
 from vcs import get_path_to_revision
 
 st.set_page_config(
-    page_title="Bugginess",
+    page_title="Bohr-UI",
     layout="wide",
 )
 
@@ -59,7 +59,7 @@ def show_lf_selection(col2, col3, col4, prefix, default_indices, dataset_names) 
     github_link = f'https://github.com/giganticode/bohr/tree/{commit}/' + str(path)
     col4.write('')
     col4.write('')
-    col4.write(f'`View labeling function on `[GitHub]({github_link})')
+    col4.write(f'*View labeling function on *[GitHub]({github_link})')
     return lf, value
 
 
@@ -69,7 +69,7 @@ def datapoints_subset_ui(dataset_names, prefix, default_indices: Optional[Tuple[
                   help='Limit to those data points on which a specific LF was fired.\n\n'
                        'The list also contains slicing function that are technically LFs but serve '
                        'the purpose of selecting important subsets of data rather assigning labels to them,'
-                       ' e.g. `small change`, `large change`')
+                       ' e.g. _small change_, _large change_')
     subset_selection_criterion = SubsetSelectionCriterion()
     show_next_lf_ui = st.session_state[f'{prefix}.dataset_subset']
     counter = 0
