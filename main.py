@@ -511,7 +511,7 @@ def confusion(dataset_name: str, model_metadata: ModelMetadata, indices, normali
     if labeled_dataset.empty:
         handle.write('No datapoints.')
         return
-    predicted_continuous = labeled_dataset['prob_CommitLabel.BugFix']
+    predicted_continuous = labeled_dataset['prob_BugFix']
     predicted = (predicted_continuous > 0.5).astype(int)
     ax= plt.subplot()
     title_details = "\n".join(map(lambda m: str(m), model_metadata.values()))

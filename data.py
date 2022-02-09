@@ -83,15 +83,45 @@ def get_label_matrix(dataset_name: str) -> pd.DataFrame:
 
 
 def zero_generator():
+    """
+    >>> it = zero_generator()
+    >>> next(it)
+    0.0
+    >>> next(it)
+    0.0
+    >>> next(it)
+    0.0
+    """
     while True:
         yield 0.
 
 
 def alternating_zero_one_generator():
+    """
+    >>> it = alternating_zero_one_generator()
+    >>> next(it)
+    1.0
+    >>> next(it)
+    0.0
+    >>> next(it)
+    1.0
+    """
     yield_one = True
     while True:
         yield 1. if yield_one else 0.
         yield_one = not yield_one
+
+
+def assert_df_format(df: pd.DataFrame, label_present: bool = True) -> None:
+    if not 'prob_BugFix' in df.columns.tolist():
+        raise AssertionError()
+    assert 'sha' in df.columns.tolist()
+    assert 'message' in df.columns.tolist()
+    if label_present:
+        assert 'label' in df.columns.tolist()
+        unq = set(df['label'].unique().tolist())
+        if unq != {0, 1}:
+            raise AssertionError(f'Values in label column: {unq}')
 
 
 @st.cache(allow_output_mutation=True, show_spinner=False)
@@ -171,28 +201,33 @@ def read_labeled_dataset_from_transformers(model_name: str, selected_dataset):
                 df = pd.read_csv(f, nrows=6000).rename(columns={'true_label': 'label'}, inplace=False)
     except PathMissingError as ex:
         raise DatasetNotFound(diff_classifier_repo, path) from ex
-    if 'label' in df.columns:
-        df.loc[:, 'label'] = df.apply(lambda row: label_to_int[row["label"]], axis=1)
-    else:
-        #df.loc[:, 'label'] = 1
-        raise AssertionError()
-    df.loc[:, 'prob_CommitLabel.BugFix'] = df.apply(
+
+    df.loc[:, 'label'] = df.apply(lambda row: label_to_int[row["label"]], axis=1)
+    df.loc[:, 'prob_BugFix'] = df.apply(
         lambda row: (row['probability'] if row['prediction'] == 'BugFix' else (1 - row['probability'])), axis=1)
+    assert_df_format(df)
     return df
 
 
 def create_syntetic_labeled_df(dataset_name: str, label_generator: Callable, label: CommitLabel, artifact_type: ArtifactType) -> pd.DataFrame:
+    label_to_int = {32752: 0, 15: 1}
     artifacts = list(map(lambda a: artifact_type(a), get_dataset(dataset_name)))
     df = create_df_from_dataset(artifacts, datasets_with_labels[dataset_name])
+    if 'label' in df.columns:
+        df.loc[:, 'label'] = df.apply(lambda row: label_to_int[row["label"]], axis=1)
+        label_present = True
+    else:
+        label_present = False
     label_generator = label_generator()
-    df_labeled = df.assign(predicted=Series([next(label_generator) for _ in range(len(df))]))
-    df_labeled[f"prob_{'|'.join(label.to_numeric_label().to_commit_labels_set())}"] = Series([1. for _ in range(len(df))])
-    return df_labeled
+    s = label.to_numeric_label().to_commit_labels_set()
+    df.loc[:, f"prob_{'|'.join(s)}"] = Series([next(label_generator) for _ in range(len(df))])
+    assert_df_format(df, label_present=label_present)
+    return df
 
 
 @st.cache(show_spinner=False)
 def read_labeled_dataset_from_bohr(model_name: str, selected_dataset_name: str):
-    label_to_int = {'CommitLabel.NonBugFix': 0, 'CommitLabel.BugFix': 1}
+    label_to_int = {32752: 0, 15: 1}
     path = f'runs/bugginess/{model_name}/{selected_dataset_name}/labeled.csv'
     path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', True)
     subprocess.run(["dvc", "pull", path], cwd=path_to_revision)
@@ -206,6 +241,10 @@ def read_labeled_dataset_from_bohr(model_name: str, selected_dataset_name: str):
         raise DatasetNotFound(diff_classifier_repo, path) from ex
     if 'label' in df.columns:
         df.loc[:, 'label'] = df.apply(lambda row: label_to_int[row["label"]], axis=1)
+        label_present=True
+    else:
+        label_present = False
+    assert_df_format(df, label_present=label_present)
     return df
 
 
