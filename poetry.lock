@@ -262,7 +262,7 @@ tabulate = "^0.8"
 type = "git"
 url = "https://github.com/giganticode/bohr-runtime"
 reference = "master"
-resolved_reference = "6b2bd69b240f904aa025b2e4a90fed2af31059b7"
+resolved_reference = "37367787c033c65b378332685bc39bc273afcb67"
 
 [[package]]
 name = "cachetools"
