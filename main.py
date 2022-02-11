@@ -21,7 +21,8 @@ st.set_page_config(
     layout="wide",
 )
 
-from config import datasets_with_labels, datasets_without_labels, get_mnemonic_for_dataset, label_models_metadata
+from config import datasets_with_labels, datasets_without_labels_bugginess, get_mnemonic_for_dataset, label_models_metadata, \
+    label_models_metadata_refactoring
 from data import read_labeled_dataset, get_dataset, compute_lf_coverages, compute_metric, get_fired_indexes, get_lfs, \
     bohr_repo, load_used_bohr_commit_sha, load_transformer_metadata, DatasetNotFound, TrueLabelNotFound, \
     NoDatapointsFound, SubsetSelectionCriterion, LFResult, get_weights, get_fired_heuristics, get_label_matrix, \
@@ -93,18 +94,19 @@ def choose_single_dataset_ui(datasets, prefix, default_indices = None) -> Tuple[
     return chosen_dataset, subset_selection_criterion
 
 
-def choose_datasets_ui(datasets, prefix) -> Tuple[List[str], SubsetSelectionCriterion]:
+def choose_datasets_ui(datasets, defaults, prefix) -> Tuple[List[str], SubsetSelectionCriterion]:
     chosen_datasets = st.multiselect('Select dataset(s) to be analyzed:', options=datasets,
-                                     default=[datasets[5], datasets[0], datasets[6]], key=f'{prefix}.msl', format_func=get_mnemonic_for_dataset)
+                                     default=defaults, key=f'{prefix}.msl', format_func=get_mnemonic_for_dataset)
     subset_selection_criterion = None
     if len(chosen_datasets) > 0:
         subset_selection_criterion = datapoints_subset_ui(chosen_datasets, prefix)
     return chosen_datasets, subset_selection_criterion
 
 
-def display_coverage() -> None:
+def display_coverage_bugginess() -> None:
     try:
-        chosen_datasets, subset_selection_criterion = choose_datasets_ui(sorted(datasets_with_labels.keys()) + datasets_without_labels, 'lf_coverage')
+        ss = sorted(datasets_with_labels['bugginess'].keys())
+        chosen_datasets, subset_selection_criterion = choose_datasets_ui(ss + datasets_without_labels_bugginess, [ss[5], ss[0], ss[6]], 'lf_coverage')
         indices = None
         if subset_selection_criterion:
             indices = {dataset: get_fired_indexes(dataset, subset_selection_criterion) for dataset in chosen_datasets}
@@ -204,7 +206,13 @@ def display_transformer_filter_ui(all_transformer_models: Iterable[ModelMetadata
     return all_transformer_models
 
 
-def collect_models(models: List[ModelMetadata], dataset_name: str, indices: List[int]):
+def collect_models(models: List[ModelMetadata], dataset_name: str, indices: List[int], task: str):
+    if task == 'bugginess':
+        l = "prob_BugFix"
+    elif task == 'refactoring':
+        l= "prob_Refactoring"
+    else:
+        raise AssertionError(task)
     n_exp = 0
     for i, model_metadata in enumerate(models):
         model_name = model_metadata['name']
@@ -222,27 +230,26 @@ def collect_models(models: List[ModelMetadata], dataset_name: str, indices: List
                 prep_df.rename(columns={'label': 'true label'}, inplace=True)
             else:
                 prep_df: pd.DataFrame = raw_df[['sha', 'message']]
-        if 'ind_perf_metrics' not in st.session_state:
-            st.session_state['ind_perf_metrics'] = 'probability'
-        if st.session_state['ind_perf_metrics'] == 'accuracy':
+        if f'{task}.ind_perf_metrics' not in st.session_state:
+            st.session_state[f'{task}.ind_perf_metrics'] = 'probability'
+        if st.session_state[f'{task}.ind_perf_metrics'] == 'accuracy':
             if 'label' in raw_df.columns:
-                prep_df.loc[:, model_name] = 1 - (raw_df["prob_BugFix"] - raw_df["label"]).abs()
+                prep_df.loc[:, model_name] = 1 - (raw_df[l] - raw_df["label"]).abs()
             else:
                 raise TrueLabelNotFound('Cannot calc accuracy for dataset without ground truth labels')
-        elif st.session_state['ind_perf_metrics'] == 'probability':
-            prep_df.loc[:, model_name] = raw_df["prob_BugFix"]
+        elif st.session_state[f'{task}.ind_perf_metrics'] == 'probability':
+            prep_df.loc[:, model_name] = raw_df[l]
         else:
             raise ValueError(f'Unknown value {st.session_state.ind_perf_metrics}')
     return prep_df, n_exp
 
 
-
 def display_model_perf_on_ind_data_points(models: List[ModelMetadata], dataset_name: str,
-                                          indices: List[int], subset_selection_criterion: SubsetSelectionCriterion):
+                                          indices: List[int], subset_selection_criterion: SubsetSelectionCriterion, task:str):
     try:
-        prep_df, n_exp = collect_models(models, dataset_name, indices)
+        prep_df, n_exp = collect_models(models, dataset_name, indices, task)
         model_names = list(map(lambda m: m['name'], models))
-        chosen_metric = st.session_state['ind_perf_metrics']
+        chosen_metric = st.session_state[f'{task}.ind_perf_metrics']
         if chosen_metric == 'accuracy':
             prep_df.loc[:, 'how_often_precise'] = prep_df[model_names].apply(lambda row: (row > 0.5).sum() / float(n_exp), axis=1)
             sort_columns=['how_often_precise', 'variance']
@@ -252,7 +259,7 @@ def display_model_perf_on_ind_data_points(models: List[ModelMetadata], dataset_n
                 prep_df.loc[:, 'how_often_precise'] = precision.apply(lambda row: (row > 0.5).sum() / float(n_exp), axis=1)
             sort_columns=['variance']
         else:
-            raise ValueError(f'Unknown metric: {st.session_state["ind_perf_metrics"]}')
+            raise ValueError(f'Unknown metric: {st.session_state[f"{task}.ind_perf_metrics"]}')
         prep_df.loc[:, 'variance'] = prep_df[model_names].apply(lambda row: np.var(row), axis=1)
 
         prep_df.sort_values(sort_columns, inplace=True, ascending=True)
@@ -268,7 +275,7 @@ def display_model_perf_on_ind_data_points(models: List[ModelMetadata], dataset_n
         st.warning('Cannot compute accuracy for selected dataset: true labels not found')
     except NoDatapointsFound:
         st.warning('No datapoints')
-    st.radio('', ['accuracy', 'probability'], key='ind_perf_metrics', format_func=format_indiv_radio)
+    st.radio('', ['accuracy', 'probability'], key=f'{task}.ind_perf_metrics', format_func=lambda s: format_indiv_radio(s, task))
 
 
 def format_subset_description(dataset_name: str, subset_selection_criterion: SubsetSelectionCriterion, n_datapoints: int):
@@ -278,10 +285,16 @@ def format_subset_description(dataset_name: str, subset_selection_criterion: Sub
     return desc
 
 
-def format_indiv_radio(s):
+def format_indiv_radio(s, task):
+    if task == 'bugginess':
+        label = 'BugFix'
+    elif task == 'refactoring':
+        label = 'Refactoring'
+    else:
+        raise AssertionError(task)
     map = {
         'accuracy': 'Accuracy on datapoint (prob assigned to true label)',
-        'probability': 'Probability assigned to BugFix class',
+        'probability': f'Probability assigned to {label} class',
     }
     return map[s]
 
@@ -324,7 +337,7 @@ def display_confusion_matrix(label_models: List[ModelMetadata], transformers: Li
             confusion(dataset, model, indices, normalize, cols[i])
 
 
-def create_metrics_dataframe(label_models: List[ModelMetadata], transformers: List[ModelMetadata], selected_datasets: List[str], indices) -> pd.DataFrame:
+def create_metrics_dataframe(label_models: List[ModelMetadata], transformers: List[ModelMetadata], selected_datasets: List[str], indices, task: str) -> pd.DataFrame:
     models = label_models + transformers
     matrix = []
     excluded_models = []
@@ -338,7 +351,7 @@ def create_metrics_dataframe(label_models: List[ModelMetadata], transformers: Li
                 abstains_present = model_metadata['model'] == 'label model'
                 df = read_labeled_dataset(model_metadata, dataset_name, indices[dataset_name] if indices is not None else None)
                 if not df.empty:
-                    res = compute_metric(df, st.session_state.metric, abstains_present)
+                    res = compute_metric(df, st.session_state.metric, abstains_present, task)
                 else:
                     res = np.nan
                     zero_datapoints_for_some_datasets = True
@@ -377,7 +390,7 @@ def create_metrics_dataframe(label_models: List[ModelMetadata], transformers: Li
     return metrics_dataframe
 
 
-def display_model_metrics(label_models: List[ModelMetadata], transformers: List[ModelMetadata], selected_datasets: List[str], indices, subset_selection_criterion: SubsetSelectionCriterion) -> List[ModelMetadata]:
+def display_model_metrics(label_models: List[ModelMetadata], transformers: List[ModelMetadata], selected_datasets: List[str], indices, subset_selection_criterion: SubsetSelectionCriterion, task: str) -> List[ModelMetadata]:
     if 'metric' not in st.session_state:
         st.session_state['metric'] = 'accuracy'
     if 'rel_imp' not in st.session_state:
@@ -385,7 +398,7 @@ def display_model_metrics(label_models: List[ModelMetadata], transformers: List[
     if 'comp_mode' not in st.session_state:
         st.session_state['comp_mode'] = 'compare to baseline'
 
-    metrics_dataframe = create_metrics_dataframe(label_models, transformers, selected_datasets, indices)
+    metrics_dataframe = create_metrics_dataframe(label_models, transformers, selected_datasets, indices, task)
     if st.session_state.rel_imp:
         metrics_dataframe = convert_metrics_to_relative(metrics_dataframe)
     metrics_dataframe.reset_index(level=[1, 2, 3, 4, 5, 6, 7], inplace=True)
@@ -511,7 +524,12 @@ def confusion(dataset_name: str, model_metadata: ModelMetadata, indices, normali
     if labeled_dataset.empty:
         handle.write('No datapoints.')
         return
-    predicted_continuous = labeled_dataset['prob_BugFix']
+    if model_metadata['task'] == 'bugginess':
+        predicted_continuous = labeled_dataset['prob_BugFix']
+    elif model_metadata['task'] == 'refactoring':
+        predicted_continuous = labeled_dataset['prob_Refactoring']
+    else:
+        raise AssertionError()
     predicted = (predicted_continuous > 0.5).astype(int)
     ax= plt.subplot()
     title_details = "\n".join(map(lambda m: str(m), model_metadata.values()))
@@ -536,12 +554,19 @@ def show_model_weights(filtered_models, subset_selection_criterion: SubsetSelect
             c.write(wl)
 
 
-def display_bugginess_performance():
-    transformer_metadata = load_transformer_metadata()
-    filtered_label_models = display_label_model_filter_ui(label_models_metadata)
+def display_performance(task: str, labels_model_m):
+    transformer_metadata = load_transformer_metadata(task)
+    filtered_label_models = display_label_model_filter_ui(labels_model_m)
     filtered_transformers = display_transformer_filter_ui(list(transformer_metadata.values()))
     filtered_models = filtered_label_models + filtered_transformers
-    selected_datasets, subset_criterion_criterion = choose_datasets_ui(sorted(datasets_with_labels.keys()), 'model_perf')
+    ss = sorted(datasets_with_labels[task].keys())
+    if task == 'bugginess':
+        defaults = [ss[5], ss[0], ss[6]]
+    elif task == 'refactoring':
+        defaults = ss[:1]
+    else:
+        raise AssertionError()
+    selected_datasets, subset_criterion_criterion = choose_datasets_ui(ss, defaults, f'{task}.model_perf')
     indices = None
     if subset_criterion_criterion:
         indices = {dataset: get_fired_indexes(dataset, subset_criterion_criterion) for dataset in selected_datasets}
@@ -550,24 +575,24 @@ def display_bugginess_performance():
     elif len(selected_datasets) == 0:
         st.warning('No datasets selected.')
     else:
-        filtered_models = display_model_metrics(filtered_label_models, filtered_transformers, selected_datasets, indices, subset_criterion_criterion)
+        filtered_models = display_model_metrics(filtered_label_models, filtered_transformers, selected_datasets, indices, subset_criterion_criterion, task)
     return filtered_models
 
 
-def display_individual_data_point_debugging(filtered_models):
+def display_individual_data_point_debugging(filtered_models, task):
     default_indices = (
-        sorted(datasets_with_labels.keys()).index(st.session_state[f'model_perf.msl'][0]) if (f'model_perf.msl' in st.session_state and st.session_state[f'model_perf.msl']) else 0,
+        sorted(datasets_with_labels[task].keys()).index(st.session_state[f'{task}.model_perf.msl'][0]) if (f'{task}.model_perf.msl' in st.session_state and st.session_state[f'{task}.model_perf.msl']) else 0,
         0,
-        st.session_state[f'model_perf.value'] if f'model_perf.value' in st.session_state else 0,
+        st.session_state[f'{task}.model_perf.value'] if f'{task}.model_perf.value' in st.session_state else 0,
     )
-    selected_dataset, subset_criterion_criterion = choose_single_dataset_ui(sorted(datasets_with_labels.keys()) + datasets_without_labels, 'model_perf_ind', default_indices)
-    if st.checkbox('Show weights assigned to selected LFs (for LMs only)', value=False, key='all_sp_weights_ind'):
+    selected_dataset, subset_criterion_criterion = choose_single_dataset_ui(sorted(datasets_with_labels[task].keys()) + datasets_without_labels_bugginess, f'{task}.model_perf_ind', default_indices)
+    if st.checkbox('Show weights assigned to selected LFs (for LMs only)', value=False, key=f'{task}.all_sp_weights_ind'):
         show_model_weights(filtered_models, subset_criterion_criterion)
     indices = None
     if subset_criterion_criterion:
         indices = get_fired_indexes(selected_dataset, subset_criterion_criterion)
     if selected_dataset is not None and len(filtered_models) > 0:
-        display_model_perf_on_ind_data_points(filtered_models, selected_dataset, indices, subset_criterion_criterion)
+        display_model_perf_on_ind_data_points(filtered_models, selected_dataset, indices, subset_criterion_criterion, task)
 
         dataset = get_dataset(selected_dataset)
         display_datapoint_search_ui(dataset, selected_dataset, filtered_models)
@@ -577,14 +602,26 @@ def main():
     random.seed(13)
     np.random.seed(42)
 
-    st.write('## Assignment of labels by labeling functions (LFs)')
-    display_coverage()
+    tasks = ['bugginess', 'refactoring']
+    task = st.sidebar.radio('', tasks, index=tasks.index('bugginess'))
 
-    st.write('## Performance of models (bugginess)')
-    filtered_models = display_bugginess_performance()
+    if task == 'bugginess':
+        st.write('## Assignment of labels by labeling functions (LFs)')
+        display_coverage_bugginess()
 
-    st.write('## Debugging individual data points')
-    display_individual_data_point_debugging(filtered_models)
+        st.write('## Performance of models')
+        filtered_models = display_performance(task, label_models_metadata)
+
+        st.write('## Debugging individual data points')
+        display_individual_data_point_debugging(filtered_models, task)
+    elif task == 'refactoring':
+        st.write('## Performance of models')
+        filtered_models = display_performance(task, label_models_metadata_refactoring)
+
+        st.write('## Debugging individual data points')
+        display_individual_data_point_debugging(filtered_models, task)
+    else:
+        raise AssertionError()
 
 
 main()
