@@ -21,7 +21,7 @@ from sklearn.metrics import f1_score
 
 from tqdm import tqdm
 
-from config import get_mnemonic_for_dataset, datasets_with_labels
+from config import get_mnemonic_for_dataset, datasets_with_labels, Task, bugginess_task
 from vcs import get_path_to_revision
 
 bohr_bugginess_repo = 'https://github.com/giganticode/bohr-workdir-bugginess'
@@ -73,6 +73,7 @@ def load_used_bohr_commit_sha() -> str:
 
 @st.cache(allow_output_mutation=True, show_spinner=False)
 def get_label_matrix(dataset_name: str) -> pd.DataFrame:
+    # TOODO this should not be bugginess-specific
     path = f'runs/bugginess/{DATASET_DEBUGGING_EXPERIMENT}/{dataset_name}/heuristic_matrix.pkl'
     path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', True)
     with st.spinner(f'Loading label matrix for dataset `{dataset_name}`'):
@@ -111,14 +112,8 @@ def alternating_zero_one_generator():
         yield_one = not yield_one
 
 
-def assert_df_format(df: pd.DataFrame, task: str, label_present: bool = True) -> None:
-    if task == 'bugginess':
-        label = 'prob_BugFix'
-    elif task == 'refactoring':
-        label = 'prob_Refactoring'
-    else:
-        raise AssertionError()
-    if not label in df.columns.tolist():
+def assert_df_format(df: pd.DataFrame, task: Task, label_present: bool = True) -> None:
+    if not task.label in df.columns.tolist():
         raise AssertionError()
     assert 'sha' in df.columns.tolist()
     assert 'message' in df.columns.tolist()
@@ -141,7 +136,7 @@ def read_labeled_dataset(model_metadata: ModelMetadata, selected_dataset_name: s
         elif model_type == 'label model':
             df = read_labeled_dataset_from_bohr(model_metadata, selected_dataset_name)
         elif model_type == 'transformer':
-            df = read_labeled_dataset_from_transformers(model_name, selected_dataset_name)
+            df = read_labeled_dataset_from_transformers(bugginess_task, model_name, selected_dataset_name)
         else:
             raise ValueError(f'Unknown model type: {model_type}')
     if indices is None:
@@ -174,8 +169,8 @@ def get_fired_heuristics(dataset: str, datapoint: int) -> SubsetSelectionCriteri
 
 
 @st.cache(show_spinner=False)
-def load_transformer_metadata(task: str) -> Dict[str, ModelMetadata]:
-    if task != 'bugginess':
+def load_transformer_metadata(task: Task) -> Dict[str, ModelMetadata]:
+    if task.name != 'bugginess':
         return {}
     path_to_revision = get_path_to_revision(diff_classifier_repo, 'master', True)
     full_path = path_to_revision / 'models'
@@ -198,8 +193,7 @@ class DatasetNotFound(Exception):
 
 
 @st.cache(show_spinner=False)
-def read_labeled_dataset_from_transformers(model_name: str, selected_dataset):
-    label_to_int = {'NonBugFix': 0, 'BugFix': 1}
+def read_labeled_dataset_from_transformers(task: Task, model_name: str, selected_dataset):
     path = f'models/{model_name}/assigned_labels_{selected_dataset}.csv'
     try:
         with st.spinner(f'Reading `{path}` from `{diff_classifier_repo}`'):
@@ -208,31 +202,23 @@ def read_labeled_dataset_from_transformers(model_name: str, selected_dataset):
     except PathMissingError as ex:
         raise DatasetNotFound(diff_classifier_repo, path) from ex
 
-    df.loc[:, 'label'] = df.apply(lambda row: label_to_int[row["label"]], axis=1)
+    df.loc[:, 'label'] = df.apply(lambda row: task.transformer_label_to_int[row["label"]], axis=1)
     df.loc[:, 'prob_BugFix'] = df.apply(
         lambda row: (row['probability'] if row['prediction'] == 'BugFix' else (1 - row['probability'])), axis=1)
-    assert_df_format(df, 'bugginess')
+    assert_df_format(df, task)
     return df
 
 
-def create_syntetic_labeled_df(dataset_name: str, label_generator: Callable, task: str, artifact_type: ArtifactType) -> pd.DataFrame:
-    if task == 'bugginess':
-        label_to_int = {32752: 0, 15: 1}
-        label = CommitLabel.BugFix
-    elif task == 'refactoring':
-        label_to_int = {32511: 0, 256: 1}
-        label = CommitLabel.Refactoring
-    else:
-        raise AssertionError()
+def create_syntetic_labeled_df(dataset_name: str, label_generator: Callable, task: Task, artifact_type: ArtifactType) -> pd.DataFrame:
     artifacts = list(map(lambda a: artifact_type(a), get_dataset(dataset_name)))
-    df = create_df_from_dataset(artifacts, datasets_with_labels[task][dataset_name])
+    df = create_df_from_dataset(artifacts, datasets_with_labels[task.name][dataset_name])
     if 'label' in df.columns:
-        df.loc[:, 'label'] = df.apply(lambda row: label_to_int[row["label"]], axis=1)
+        df.loc[:, 'label'] = df.apply(lambda row: task.label_model_label_to_int[row["label"]], axis=1)
         label_present = True
     else:
         label_present = False
     label_generator = label_generator()
-    s = label.to_numeric_label().to_commit_labels_set()
+    s = task.label_obj.to_numeric_label().to_commit_labels_set()
     df.loc[:, f"prob_{'|'.join(s)}"] = Series([next(label_generator) for _ in range(len(df))])
     assert_df_format(df, task, label_present=label_present)
     return df
@@ -241,13 +227,7 @@ def create_syntetic_labeled_df(dataset_name: str, label_generator: Callable, tas
 @st.cache(show_spinner=False)
 def read_labeled_dataset_from_bohr(model_metadata: ModelMetadata, selected_dataset_name: str):
     task = model_metadata["task"]
-    if task == 'bugginess':
-        label_to_int = {32752: 0, 15: 1}
-    elif task == 'refactoring':
-        label_to_int = {32511: 0, 256: 1}
-    else:
-        raise AssertionError()
-    path = f'runs/{task}/{model_metadata["name"]}/{selected_dataset_name}/labeled.csv'
+    path = f'runs/{task.name}/{model_metadata["name"]}/{selected_dataset_name}/labeled.csv'
     path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', True)
     subprocess.run(["dvc", "pull", path], cwd=path_to_revision)
     full_path = f'{path_to_revision}/{path}'
@@ -259,7 +239,7 @@ def read_labeled_dataset_from_bohr(model_metadata: ModelMetadata, selected_datas
     except FileNotFoundError as ex:
         raise DatasetNotFound(bohr_bugginess_repo, path) from ex
     if 'label' in df.columns:
-        df.loc[:, 'label'] = df.apply(lambda row: label_to_int[row["label"]], axis=1)
+        df.loc[:, 'label'] = df.apply(lambda row: task.label_model_label_to_int[row["label"]], axis=1)
         label_present=True
     else:
         label_present = False
@@ -367,17 +347,11 @@ class NoDatapointsFound(Exception):
 
 
 @st.cache(show_spinner=False)
-def compute_metric(df, metric, randomize_abstains, task: str) -> float:
-    if task == 'bugginess':
-        l = 'prob_BugFix'
-    elif task == 'refactoring':
-        l = 'prob_Refactoring'
-    else:
-        raise AssertionError(task)
+def compute_metric(df, metric, randomize_abstains, label: str) -> float:
     if randomize_abstains and metric != 'certainty':
-        predicted_continuous = df.apply(lambda row: (np.random.random() if np.isclose(row[l], 0.5) else row[l]), axis=1)
+        predicted_continuous = df.apply(lambda row: (np.random.random() if np.isclose(row[label], 0.5) else row[label]), axis=1)
     else:
-        predicted_continuous = df[l]
+        predicted_continuous = df[label]
     predicted = (predicted_continuous > 0.5).astype(int)
     if 'label' not in df.columns:
         raise TrueLabelNotFound()

@@ -1,4 +1,9 @@
+from dataclasses import dataclass
+from typing import Dict, Optional
+
+from bohrlabels.core import Label
 from bohrlabels.labels import CommitLabel
+from frozendict import frozendict
 
 map = {
     'levin_files': 'levin (files)',
@@ -36,6 +41,20 @@ datasets_with_labels = {
 datasets_without_labels_bugginess = [d for d in map if d not in datasets_with_labels['bugginess'].keys()]
 
 
+@dataclass(frozen=True)
+class Task:
+    name: str
+    label_obj: Label
+    label: str
+    label_model_label_to_int: Dict[int, int]
+    transformer_label_to_int: Optional[Dict[str, int]] = None
+
+
+bugginess_task = Task('bugginess', CommitLabel.BugFix, 'prob_BugFix', frozendict({32752: 0, 15: 1}), frozendict({'NonBugFix': 0, 'BugFix': 1}))
+refactoring_task = Task('refactoring', CommitLabel.Refactoring, 'prob_Refactoring', frozendict({32511: 0, 256: 1}))
+
+all_tasks = [bugginess_task, refactoring_task]
+
 label_models_metadata_refactoring = [
     {
         'name': 'zero_model',
@@ -43,7 +62,7 @@ label_models_metadata_refactoring = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'herzig_train',
-        'task': 'refactoring',
+        'task': refactoring_task,
     },
     {
         'name': 'random_model',
@@ -51,7 +70,7 @@ label_models_metadata_refactoring = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'herzig_train',
-        'task': 'refactoring',
+        'task': refactoring_task,
     },
     {
         'name': 'refactoring_no_ref_heuristics',
@@ -59,7 +78,7 @@ label_models_metadata_refactoring = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'herzig_train',
-        'task': 'refactoring',
+        'task': refactoring_task,
     },
     {
         'name': 'refactoring_few_ref_heuristics',
@@ -67,9 +86,10 @@ label_models_metadata_refactoring = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'herzig_train',
-        'task': 'refactoring',
+        'task': refactoring_task,
     },
 ]
+
 
 label_models_metadata = [
     {
@@ -78,7 +98,7 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'commits_200k_files',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'random_model',
@@ -86,7 +106,7 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'commits_200k_files',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'gitcproc',
@@ -94,7 +114,7 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'commits_200k_files',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'gitcproc_orig',
@@ -102,7 +122,7 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'commits_200k_files',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'all_heuristics_without_issues',
@@ -110,7 +130,7 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'commits_200k_files',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'all_heuristics_with_issues',
@@ -118,7 +138,7 @@ label_models_metadata = [
         'issues': 'with issues',
         'model': 'label model',
         'train_dataset': 'commits_200k_files',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'only_keywords',
@@ -126,7 +146,7 @@ label_models_metadata = [
         'issues': 'with issues',
         'model': 'label model',
         'train_dataset': 'commits_200k_files',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'only_message_and_label_keywords',
@@ -134,7 +154,7 @@ label_models_metadata = [
         'issues': 'issue labels',
         'model': 'label model',
         'train_dataset': 'commits_200k_files',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'only_message_keywords',
@@ -142,7 +162,7 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'commits_200k_files',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'all_heuristics_without_issues_berger',
@@ -150,7 +170,7 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'berger_train',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'all_heuristics_without_issues_herzig',
@@ -158,7 +178,7 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'herzig_train',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'all_heuristics_without_issues_levin',
@@ -166,7 +186,7 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'levin_train',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'all_heuristics_without_issues_important_projects',
@@ -174,7 +194,7 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'levin_berger_herzig_train',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'all_heuristics_without_issues_orig200k',
@@ -182,7 +202,7 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'commits_200k',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'only_message_keywords_berger',
@@ -190,7 +210,7 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'berger_train',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'only_message_keywords_herzig',
@@ -198,7 +218,7 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'herzig_train',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'only_message_keywords_levin',
@@ -206,7 +226,7 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'levin_train',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
     {
         'name': 'only_message_keywords_important_projects',
@@ -214,6 +234,6 @@ label_models_metadata = [
         'issues': 'without issues',
         'model': 'label model',
         'train_dataset': 'levin_berger_herzig_train',
-        'task': 'bugginess',
+        'task': bugginess_task,
     },
 ]
