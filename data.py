@@ -62,7 +62,6 @@ def get_label_matrix_locally(tmp_path):
         return pd.read_pickle(tmp_path)
 
 
-@st.cache(show_spinner=False)
 def load_used_bohr_commit_sha() -> str:
     path_to_revision = get_path_to_revision(bohr_bugginess_repo, 'master', True)
     workspace = load_workspace(path_to_revision)

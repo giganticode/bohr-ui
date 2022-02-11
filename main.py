@@ -7,7 +7,7 @@ import streamlit as st
 import numpy as np
 import seaborn as sns
 from bohrapi.artifacts import Commit
-from bohrruntime.heuristics import load_heuristic_by_name
+from bohrruntime.api import load_heuristic_by_name
 from bohrruntime.util.paths import AbsolutePath
 from dvc.exceptions import PathMissingError
 from matplotlib import pyplot as plt
@@ -57,7 +57,7 @@ def show_lf_selection(col2, col3, col4, prefix, default_indices, dataset_names) 
     commit = load_used_bohr_commit_sha()
     path_to_revision = get_path_to_revision(bohr_repo, 'bohr-0.5', True, commit)
     _, path = load_heuristic_by_name(lf, Commit, AbsolutePath(path_to_revision) / 'heuristics', return_path=True)
-    github_link = f'https://github.com/giganticode/bohr/tree/{commit}/' + str(path)
+    github_link = f'https://github.com/giganticode/bohr/tree/{commit}/heuristics/' + path
     col4.write('')
     col4.write('')
     col4.write(f'*View labeling function on *[GitHub]({github_link})')
